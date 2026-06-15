@@ -56,6 +56,14 @@ body, .gradio-container {
     font-size: 0.95rem;
     font-weight: 500;
 }
+/* Ensure headers, markdown text, and accordion labels are bright and readable */
+.gradio-container h1, .gradio-container h2, .gradio-container h3, 
+.gradio-container h4, .gradio-container h5, .gradio-container h6,
+.gradio-container .prose h3, .gradio-container .prose p,
+.gradio-container details summary, .gradio-container details summary span,
+.gradio-container button.label-wrap, .gradio-container button.label-wrap span {
+    color: #f1f5f9 !important;
+}
 """
 
 def create_ui():

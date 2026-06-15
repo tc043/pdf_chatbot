@@ -8,6 +8,15 @@ The application utilizes **Chroma DB** for local vector indexing. For local embe
 
 ---
 
+## UI Preview
+
+![PDF Chatbot Interface](assets/demo_screenshot.png)
+
+*Interaction Demonstration:*
+![Walkthrough Animation](assets/demo_recording.webp)
+
+---
+
 ## Project Structure
 
 ```
@@ -90,3 +99,6 @@ Once running, the terminal will display a local URL (e.g., `http://127.0.0.1:786
 - **Interactive PDF Viewer**: Renders and previews PDF pages. Use the navigation buttons in the UI to page through your document manually.
 - **Hybrid Reasoning**: MiniCPM5-1B-SFT's built-in "Think/No-Think" reasoning mode can be toggled via the settings panel.
 - **Chroma DB Persistence**: Vector databases are saved to `.chromadb/` locally, letting you query previously indexed PDFs instantly.
+- **Included Demo PDFs**: We have included two landmark AI research papers in the `demo_pdfs/` folder for quick testing:
+  1. `attention_is_all_you_need.pdf`: The foundational Transformer architecture paper.
+  2. `gpt3_paper.pdf`: The language models are few-shot learners (GPT-3) paper.

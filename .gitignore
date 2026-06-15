@@ -44,6 +44,7 @@ db/
 temp_pdf/
 *.pdf
 !sample.pdf
+!demo_pdfs/*.pdf
 
 # OS files
 .DS_Store
