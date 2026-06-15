@@ -1,0 +1,12 @@
+gradio>=5.5.0
+pymupdf>=1.24.0
+chromadb>=0.4.0
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-openai>=0.0.5
+langchain-chroma>=0.1.0
+sentence-transformers>=2.2.0
+transformers>=5.0.0
+torch
+accelerate
+huggingface-hub
