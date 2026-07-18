@@ -49,3 +49,14 @@ temp_pdf/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Local Services logs & data
+*.log
+minio
+minio_data/
