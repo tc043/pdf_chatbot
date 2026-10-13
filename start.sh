@@ -1,23 +1,21 @@
 #!/usr/bin/env bash
+# Launch the PDF Chatbot using the project's virtual environment.
+set -euo pipefail
 
-# Determine script directory
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
-# Check if venv exists
 if [ ! -d ".venv" ]; then
-    echo "Virtual environment (.venv) not found!"
-    echo "Please create it first by running: python3 -m venv .venv --system-site-packages --without-pip"
+    echo "Virtual environment (.venv) not found." >&2
+    echo "Create it and install the dependencies first:" >&2
+    echo "    python3 -m venv .venv" >&2
+    echo "    source .venv/bin/activate" >&2
+    echo "    pip install -r requirements.txt" >&2
     exit 1
 fi
 
-# Activate venv
-echo "Activating virtual environment..."
+# shellcheck disable=SC1091
 source .venv/bin/activate
 
-# Run the app
 echo "Launching PDF Chatbot..."
-python run.py
-
-# Deactivate
-deactivate
+exec python run.py
