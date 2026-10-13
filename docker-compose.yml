@@ -1,0 +1,27 @@
+services:
+  pdf-chatbot:
+    build:
+      context: .
+      args:
+        WITH_LOCAL_MODEL: "false"   # "true" bundles PyTorch for the local MiniCPM backend (large)
+    ports:
+      # Bound to localhost on purpose. To expose it on the network, change this deliberately
+      # and set PDFCHAT_AUTH_USER / PDFCHAT_AUTH_PASSWORD (or use an authenticating proxy).
+      - "127.0.0.1:7860:7860"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # false = users must type their own key; true = fall back to OPENAI_API_KEY above.
+      PDFCHAT_USE_SERVER_KEY: ${PDFCHAT_USE_SERVER_KEY:-false}
+      PDFCHAT_AUTH_USER: ${PDFCHAT_AUTH_USER:-}
+      PDFCHAT_AUTH_PASSWORD: ${PDFCHAT_AUTH_PASSWORD:-}
+    volumes:
+      - pdfchat-data:/data   # vector index and downloaded model cache
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp   # Gradio's upload temp files
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pdfchat-data:
