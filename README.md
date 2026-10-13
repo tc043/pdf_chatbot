@@ -95,7 +95,7 @@ Invalid values stop the app at startup with a message naming the variable.
 | `PDFCHAT_MAX_PDF_MB` / `PDFCHAT_MAX_PDF_PAGES` | `25` / `300` | Upload limits |
 | `PDFCHAT_MAX_QUESTION_CHARS` | `2000` | Question length limit |
 | `PDFCHAT_OPENAI_TIMEOUT_S` / `PDFCHAT_OPENAI_MAX_RETRIES` | `60` / `2` | OpenAI request behaviour |
-| `PDFCHAT_LOCAL_TOKEN_TIMEOUT_S` | `120` | Abort a local generation that stalls this long |
+| `PDFCHAT_LOCAL_TOKEN_TIMEOUT_S` | `120` | Abort a local generation that stalls this long; also how long a request waits for a busy local model before failing with a "busy" error |
 | `PDFCHAT_MAX_CONCURRENT_REQUESTS` / `PDFCHAT_QUEUE_MAX_SIZE` | `2` / `20` | Gradio concurrency and queue bound |
 | `PDFCHAT_LOG_LEVEL` | `INFO` | Python logging level |
 

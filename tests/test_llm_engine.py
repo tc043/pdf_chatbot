@@ -221,6 +221,73 @@ def test_closing_the_stream_cancels_generation():
     assert finished.wait(timeout=2)
 
 
+def _wait_until(predicate, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+def test_model_stays_reserved_until_a_stalled_worker_really_exits():
+    """Regression: after the join timeout the lock used to be released while the worker was
+    still inside model.generate(), so a queued request could use the model concurrently."""
+    streamer, cancel = FakeStreamer(timeout=0.2), threading.Event()
+    lock = threading.Lock()
+    lock.acquire()  # held on behalf of the worker, like generate_local_stream does
+    stall = threading.Event()
+
+    def generate():  # ignores cancellation, like a wedged CPU/GPU operation
+        stall.wait(timeout=10)
+
+    with pytest.raises(GenerationError, match="too long"):
+        list(
+            llm_engine._stream_in_thread(
+                generate, streamer, cancel, join_timeout=0.1, on_finished=lock.release
+            )
+        )
+    assert lock.locked(), "model was released while the worker was still running"
+    stall.set()  # the worker finally exits...
+    assert _wait_until(lambda: not lock.locked()), "...and only then is the model released"
+
+
+def test_on_finished_runs_after_normal_completion_and_after_a_crash():
+    for crash in (False, True):
+        streamer, cancel = FakeStreamer(), threading.Event()
+        released = []
+
+        def generate(streamer=streamer, crash=crash):
+            streamer.put("x")
+            if crash:
+                raise RuntimeError("boom")
+
+        stream = llm_engine._stream_in_thread(
+            generate, streamer, cancel, on_finished=lambda r=released: r.append(1)
+        )
+        if crash:
+            with pytest.raises(GenerationError):
+                list(stream)
+        else:
+            assert list(stream) == ["x"]
+        assert released == [1]  # exactly once
+
+
+def test_on_finished_runs_when_the_worker_thread_cannot_start(monkeypatch):
+    released = []
+
+    def cannot_start(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", cannot_start)
+    stream = llm_engine._stream_in_thread(
+        lambda: None, FakeStreamer(), threading.Event(), on_finished=lambda: released.append(1)
+    )
+    with pytest.raises(RuntimeError, match="can't start"):
+        next(stream)
+    assert released == [1]
+
+
 # ------------------------------------------------------------ chat template
 
 

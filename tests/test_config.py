@@ -101,3 +101,19 @@ def test_log_filter_redacts_api_keys():
     assert RedactSecretsFilter().filter(record)
     assert "abcdefghijkl" not in record.getMessage()
     assert "sk-***" in record.getMessage()
+
+
+@pytest.mark.parametrize("value", ["nan", "NaN", "inf", "-inf"])
+def test_non_finite_numbers_are_rejected(monkeypatch, value):
+    """float() accepts these and they pass a ">= minimum" check, but as timeouts they mean
+    "wait forever"."""
+    monkeypatch.setenv("PDFCHAT_LOCAL_TOKEN_TIMEOUT_S", value)
+    with pytest.raises(ConfigError, match="finite"):
+        config.Settings.from_env()
+
+
+@pytest.mark.parametrize("name", ["openai_timeout_s", "local_token_timeout_s"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), 0.0, -1.0])
+def test_timeouts_set_in_code_must_be_positive_and_finite(name, value):
+    with pytest.raises(ConfigError, match="positive, finite"):
+        config.Settings(**{name: value})

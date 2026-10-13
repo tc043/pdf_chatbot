@@ -146,3 +146,17 @@ def test_concurrent_requests_are_serialised_not_interleaved(manager):
         t.join(timeout=60)
     assert not errors
     assert len(results) == 3 and len(set(results)) == 1  # greedy => identical outputs
+
+
+def test_a_busy_model_gives_queued_requests_a_clear_error_instead_of_racing(manager):
+    """If another generation holds the model (e.g. a stalled one), a new request must wait a
+    bounded time and then fail clearly rather than call the model concurrently."""
+    assert manager.generation_lock.acquire(timeout=1)
+    try:
+        started = time.monotonic()
+        with pytest.raises(GenerationError, match="busy"):
+            list(stream(settings=config.Settings(local_token_timeout_s=1)))
+        assert 0.8 < time.monotonic() - started < 5
+    finally:
+        manager.generation_lock.release()
+    assert list(stream(max_tokens=3))  # and it works again once the model is free

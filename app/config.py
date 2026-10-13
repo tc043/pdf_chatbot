@@ -8,6 +8,7 @@ read from the environment and no directories are created until
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -58,6 +59,10 @@ def _float(name: str, default: float, minimum: float) -> float:
         value = float(raw)
     except ValueError:
         raise ConfigError(f"{ENV_PREFIX}{name} must be a number, got {raw!r}.") from None
+    # float() happily parses "nan" and "inf"; both slip past a ">= minimum" check
+    # and would turn a timeout into "wait forever".
+    if not math.isfinite(value):
+        raise ConfigError(f"{ENV_PREFIX}{name} must be a finite number, got {raw!r}.")
     if value < minimum:
         raise ConfigError(f"{ENV_PREFIX}{name} must be >= {minimum}, got {value}.")
     return value
@@ -125,6 +130,10 @@ class Settings:
             raise ConfigError(
                 f"Set both {ENV_PREFIX}AUTH_USER and {ENV_PREFIX}AUTH_PASSWORD, or neither."
             )
+        for name in ("openai_timeout_s", "local_token_timeout_s"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0:
+                raise ConfigError(f"{name} must be a positive, finite number of seconds.")
         if self.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ConfigError(f"{ENV_PREFIX}LOG_LEVEL is not a valid logging level.")
 

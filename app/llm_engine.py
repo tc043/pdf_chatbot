@@ -207,6 +207,7 @@ def _stream_in_thread(
     streamer: Iterable[str],
     cancel: threading.Event,
     join_timeout: float = 10.0,
+    on_finished: Callable[[], None] | None = None,
 ) -> Iterator[str]:
     """Run ``generate`` in a worker thread and yield text from ``streamer``.
 
@@ -215,7 +216,11 @@ def _stream_in_thread(
       as :class:`GenerationError` instead of blocking the consumer forever;
     * a stalled model surfaces as a timeout error (``queue.Empty`` from the streamer);
     * if the consumer stops early (client disconnect), ``cancel`` is set so the worker
-      stops generating and releases the model.
+      stops generating and releases the model;
+    * ``on_finished`` runs when the worker has *actually* exited, not when the consumer
+      gives up. A caller that holds a lock around the model can hand its release to this
+      callback, so a worker that ignores cancellation (a stalled operation) keeps the
+      model reserved instead of letting a second request use it concurrently.
     """
     failure: list[BaseException] = []
 
@@ -226,10 +231,20 @@ def _stream_in_thread(
             failure.append(exc)
             logger.exception("Local generation failed")
         finally:
-            streamer.end()  # type: ignore[attr-defined]
+            try:
+                streamer.end()  # type: ignore[attr-defined]
+            finally:
+                if on_finished is not None:
+                    on_finished()
 
     thread = threading.Thread(target=worker, name="local-generate", daemon=True)
-    thread.start()
+    try:
+        thread.start()
+    except BaseException:
+        # The worker never ran, so nothing else will call on_finished.
+        if on_finished is not None:
+            on_finished()
+        raise
     try:
         for text in streamer:
             if text:
@@ -243,7 +258,11 @@ def _stream_in_thread(
         cancel.set()
         thread.join(timeout=join_timeout)
         if thread.is_alive():
-            logger.warning("Local generation thread did not stop within %.0fs", join_timeout)
+            logger.warning(
+                "Local generation thread did not stop within %.0fs; the model stays reserved "
+                "until it exits",
+                join_timeout,
+            )
     if failure:
         raise GenerationError(
             "The local model failed while generating. Details are in the server log."
@@ -279,7 +298,15 @@ def generate_local_stream(
                 (input_ids.shape[0],), cancel.is_set(), dtype=torch.bool, device=input_ids.device
             )
 
-    with manager.generation_lock:
+    # The lock is handed to the worker thread, which releases it when generation has really
+    # ended (see _stream_in_thread). Waiting is bounded so a wedged generation produces a
+    # clear "busy" error for queued requests instead of an indefinite hang.
+    lock = manager.generation_lock
+    if not lock.acquire(timeout=settings.local_token_timeout_s):
+        raise GenerationError(
+            "The local model is busy with another request. Please try again shortly."
+        )
+    try:
         inputs = _build_inputs(manager.tokenizer, prompt, enable_thinking)
         streamer = TextIteratorStreamer(
             manager.tokenizer,
@@ -297,4 +324,10 @@ def generate_local_stream(
         }
         if temperature > 0:
             kwargs["temperature"] = temperature
-        yield from _stream_in_thread(lambda: manager.model.generate(**kwargs), streamer, cancel)
+        stream = _stream_in_thread(
+            lambda: manager.model.generate(**kwargs), streamer, cancel, on_finished=lock.release
+        )
+    except BaseException:
+        lock.release()  # preparation failed before the worker (the new owner) existed
+        raise
+    yield from stream
