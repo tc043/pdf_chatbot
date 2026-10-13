@@ -49,3 +49,10 @@ temp_pdf/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Tooling caches and local env
+.env
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
