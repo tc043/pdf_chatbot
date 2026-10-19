@@ -4,7 +4,7 @@
 # On machines without a GPU, install the CPU build of PyTorch first to save several GB:
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
 torch>=2.2
-transformers>=5.0.0
+transformers>=5.20.0
 accelerate>=0.30
 sentence-transformers>=3.0
 huggingface-hub
