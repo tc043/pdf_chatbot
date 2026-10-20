@@ -3,7 +3,7 @@
 #   pip install -r requirements.txt -r requirements-local.txt
 # On machines without a GPU, install the CPU build of PyTorch first to save several GB:
 #   pip install torch --index-url https://download.pytorch.org/whl/cpu
-torch>=2.2
+torch>=2.14.1
 transformers>=5.20.1
 accelerate>=0.30
 sentence-transformers>=3.0
