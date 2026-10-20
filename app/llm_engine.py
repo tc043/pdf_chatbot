@@ -6,7 +6,7 @@ import logging
 import queue
 import re
 import threading
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any
 
 from langchain_core.documents import Document
@@ -31,8 +31,13 @@ RULES = (
     "answer, say what is missing instead of guessing."
 )
 
-# Prevents document text from closing or opening our own prompt tags.
-_TAG_RE = re.compile(r"</?\s*(?:context|excerpt)\b[^>]*>", re.IGNORECASE)
+HISTORY_RULE = (
+    "The earlier conversation inside <history> is only for resolving references such as "
+    '"it" or "that"; every fact in your answer must still come from the excerpts.'
+)
+
+# Prevents document or earlier-answer text from closing or opening our own prompt tags.
+_TAG_RE = re.compile(r"</?\s*(?:context|excerpt|history|turn)\b[^>]*>", re.IGNORECASE)
 
 
 def _page_number(doc: Document) -> int:
@@ -51,13 +56,34 @@ def _excerpt_attrs(doc: Document) -> str:
     return attrs
 
 
-def format_rag_prompt(question: str, context_docs: Iterable[Document]) -> str:
-    """Build the RAG prompt: rules, delimited excerpts with page numbers, then the question."""
+def _format_history(history: Sequence[tuple[str, str]]) -> str:
+    turns = "\n".join(
+        f"<turn>\nUser: {_TAG_RE.sub('', user)}\nAssistant: {_TAG_RE.sub('', answer)}\n</turn>"
+        for user, answer in history
+    )
+    return f"<history>\n{turns}\n</history>"
+
+
+def format_rag_prompt(
+    question: str,
+    context_docs: Iterable[Document],
+    history: Sequence[tuple[str, str]] = (),
+) -> str:
+    """Build the RAG prompt: rules, delimited excerpts with page numbers, then the question.
+
+    ``history`` holds earlier (question, answer) pairs, oldest first. They are placed in
+    their own delimited block, with a rule that they only help resolve references.
+    """
     excerpts = "\n".join(
         f"<excerpt {_excerpt_attrs(doc)}>\n{_TAG_RE.sub('', doc.page_content)}\n</excerpt>"
         for doc in context_docs
     )
-    return f"{RULES}\n\n<context>\n{excerpts}\n</context>\n\nQuestion: {question.strip()}"
+    if not history:
+        return f"{RULES}\n\n<context>\n{excerpts}\n</context>\n\nQuestion: {question.strip()}"
+    return (
+        f"{RULES}\n{HISTORY_RULE}\n\n<context>\n{excerpts}\n</context>\n\n"
+        f"{_format_history(history)}\n\nQuestion: {question.strip()}"
+    )
 
 
 # --------------------------------------------------------------------------- #

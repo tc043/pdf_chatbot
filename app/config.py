@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -23,6 +24,14 @@ ENV_PREFIX = "PDFCHAT_"
 BACKEND_OPENAI = "OpenAI"
 BACKEND_LOCAL = "Local Model (MiniCPM5-1B)"
 BACKENDS = (BACKEND_OPENAI, BACKEND_LOCAL)
+
+OCR_AUTO = "auto"
+OCR_OFF = "off"
+OCR_MODES = (OCR_AUTO, OCR_OFF)
+
+RETRIEVAL_VECTOR = "vector"
+RETRIEVAL_HYBRID = "hybrid"
+RETRIEVAL_MODES = (RETRIEVAL_VECTOR, RETRIEVAL_HYBRID)
 
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
@@ -96,6 +105,17 @@ class Settings:
     chunk_size: int = 1000
     chunk_overlap: int = 200
     retriever_k: int = 3
+    retrieval_mode: str = RETRIEVAL_HYBRID
+    history_turns: int = 3  # earlier question/answer pairs given to the model; 0 = none
+
+    # OCR for scanned pages (needs the Tesseract program; see README)
+    ocr: str = OCR_AUTO  # "auto" = read pages that have no text when Tesseract is installed
+    ocr_language: str = "eng"  # Tesseract language code(s), e.g. "eng" or "eng+deu"
+    ocr_max_pages: int = 50
+
+    # Index retention (0 = keep everything, the default)
+    index_max_count: int = 0  # keep at most this many PDFs' indexes
+    index_max_age_days: int = 0  # delete indexes unused for this many days
 
     # Limits
     max_pdf_mb: int = 25
@@ -134,6 +154,17 @@ class Settings:
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
                 raise ConfigError(f"{name} must be a positive, finite number of seconds.")
+        if self.ocr not in OCR_MODES:
+            raise ConfigError(f"{ENV_PREFIX}OCR must be one of: {', '.join(OCR_MODES)}.")
+        if not re.fullmatch(r"[A-Za-z0-9_]+(\+[A-Za-z0-9_]+)*", self.ocr_language):
+            raise ConfigError(
+                f"{ENV_PREFIX}OCR_LANGUAGE must be Tesseract language codes such as 'eng' "
+                "or 'eng+deu'."
+            )
+        if self.retrieval_mode not in RETRIEVAL_MODES:
+            raise ConfigError(
+                f"{ENV_PREFIX}RETRIEVAL_MODE must be one of: {', '.join(RETRIEVAL_MODES)}."
+            )
         if self.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ConfigError(f"{ENV_PREFIX}LOG_LEVEL is not a valid logging level.")
 
@@ -158,6 +189,13 @@ class Settings:
             chunk_size=_int("CHUNK_SIZE", cls.chunk_size, 100, 20000),
             chunk_overlap=_int("CHUNK_OVERLAP", cls.chunk_overlap, 0, 10000),
             retriever_k=_int("RETRIEVER_K", cls.retriever_k, 1, 20),
+            retrieval_mode=_str("RETRIEVAL_MODE", cls.retrieval_mode).lower(),
+            history_turns=_int("HISTORY_TURNS", cls.history_turns, 0, 20),
+            ocr=_str("OCR", cls.ocr).lower(),
+            ocr_language=_str("OCR_LANGUAGE", cls.ocr_language),
+            ocr_max_pages=_int("OCR_MAX_PAGES", cls.ocr_max_pages, 1, 10000),
+            index_max_count=_int("INDEX_MAX_COUNT", cls.index_max_count, 0, 100000),
+            index_max_age_days=_int("INDEX_MAX_AGE_DAYS", cls.index_max_age_days, 0, 36500),
             max_pdf_mb=_int("MAX_PDF_MB", cls.max_pdf_mb, 1, 1024),
             max_pdf_pages=_int("MAX_PDF_PAGES", cls.max_pdf_pages, 1, 10000),
             max_question_chars=_int("MAX_QUESTION_CHARS", cls.max_question_chars, 10, 100000),

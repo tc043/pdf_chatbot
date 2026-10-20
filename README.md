@@ -23,6 +23,9 @@ Vectors are stored locally in [Chroma](https://www.trychroma.com/); the UI is bu
 
 - **Two backends**, switchable in the UI: OpenAI chat models or the local MiniCPM5-1B-SFT
   (with its Think / No-Think reasoning toggle).
+- **Follow-up questions**: the last few turns are remembered, so "what about its cost?" works.
+- **Scanned PDFs** (optional): pages that are only pictures of text are read with
+  [Tesseract](https://github.com/tesseract-ocr/tesseract) OCR when it is installed.
 - **Page-aware answers**: excerpts are labelled with page numbers, the model is asked to cite
   them, and the page viewer jumps to the best-matching page.
 - **Interactive page viewer** with previous/next and jump-to-page.
@@ -31,7 +34,7 @@ Vectors are stored locally in [Chroma](https://www.trychroma.com/); the UI is bu
   collide and an edited file is re-indexed.
 - **Input and resource limits**: file size, page count, question length, request timeouts,
   retries, and a bounded request queue (all configurable).
-- **Clear errors**: password-protected, corrupt, non-PDF and scanned (image-only) files are
+- **Clear errors**: password-protected, corrupt, non-PDF and unreadable scanned files are
   rejected with an explanation; provider problems (bad key, rate limit, timeout) are reported
   in plain language and details go to the server log, not the browser.
 - **Demo PDFs** in `demo_pdfs/` for quick testing: *Attention Is All You Need* and the GPT-3
@@ -63,6 +66,17 @@ On a machine without a GPU, install the much smaller CPU build of PyTorch first:
 The first local question downloads the model weights (about 2 GB) and embedding model.
 If the optional packages are missing, the UI tells you which command to run.
 
+### Scanned PDFs / OCR (optional)
+
+Pages with no text layer but with an image are read with OCR if the Tesseract program is
+installed (for example `sudo apt install tesseract-ocr`, `brew install tesseract`, or the
+Windows installer) together with the language data you need. Without it, a scanned PDF is
+rejected with a message that says so. Pages with a normal text layer are never OCR'd. OCR is
+slow (roughly a second or less per page) and runs while the PDF is indexed, so the number of
+OCR'd pages is limited (`PDFCHAT_OCR_MAX_PAGES`); a PDF above the limit is rejected with a
+message naming it. Switch OCR off with `PDFCHAT_OCR=off`. Turning OCR on rebuilds the index of
+documents that were indexed without it.
+
 ### Docker
 
 ```bash
@@ -70,7 +84,8 @@ docker compose up --build            # OpenAI backend, http://127.0.0.1:7860
 ```
 
 Set `WITH_LOCAL_MODEL: "true"` under `build.args` in `docker-compose.yml` to bundle PyTorch
-for the local backend (several GB). The container runs as a non-root user, keeps all state in
+for the local backend (several GB), and `WITH_OCR: "true"` to install Tesseract (English) for
+scanned PDFs (about 100 MB). The container runs as a non-root user, keeps all state in
 the `/data` volume, and does not use the server's `OPENAI_API_KEY` unless you opt in with
 `PDFCHAT_USE_SERVER_KEY=true`.
 
@@ -91,8 +106,12 @@ Invalid values stop the app at startup with a message naming the variable.
 | `PDFCHAT_LOCAL_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model for the local backend |
 | `PDFCHAT_CHUNK_SIZE` / `PDFCHAT_CHUNK_OVERLAP` | `1000` / `200` | Chunking (characters) |
 | `PDFCHAT_RETRIEVER_K` | `3` | Chunks passed to the model |
+| `PDFCHAT_INDEX_MAX_COUNT` / `PDFCHAT_INDEX_MAX_AGE_DAYS` | `0` / `0` | Optional retention: keep indexes for at most this many PDFs / delete indexes unused this long (`0` = keep everything). The PDF in use is never removed |
+| `PDFCHAT_HISTORY_TURNS` | `3` | Earlier question/answer pairs given to the model for follow-ups (`0` turns memory off) |
+| `PDFCHAT_RETRIEVAL_MODE` | `hybrid` | `hybrid` merges vector search with BM25 keyword search; `vector` uses embeddings only |
 | `PDFCHAT_CHROMA_DIR` | `./.chromadb` | Where the vector index is stored |
 | `PDFCHAT_MAX_PDF_MB` / `PDFCHAT_MAX_PDF_PAGES` | `25` / `300` | Upload limits |
+| `PDFCHAT_OCR` / `PDFCHAT_OCR_LANGUAGE` / `PDFCHAT_OCR_MAX_PAGES` | `auto` / `eng` / `50` | OCR for scanned pages: `auto` (when Tesseract is installed) or `off`; Tesseract language codes such as `eng+deu`; maximum pages to OCR per PDF |
 | `PDFCHAT_MAX_QUESTION_CHARS` | `2000` | Question length limit |
 | `PDFCHAT_OPENAI_TIMEOUT_S` / `PDFCHAT_OPENAI_MAX_RETRIES` | `60` / `2` | OpenAI request behaviour |
 | `PDFCHAT_LOCAL_TOKEN_TIMEOUT_S` | `120` | Abort a local generation that stalls this long; also how long a request waits for a busy local model before failing with a "busy" error |
@@ -108,7 +127,7 @@ mixing incompatible vectors.
 flowchart LR
     A[Upload PDF] --> B["Validate<br/>size, pages, encryption, text"]
     B --> C["Index (once per file)<br/>extract pages, chunk, embed, store in Chroma"]
-    Q[Question] --> D[Retrieve top-k chunks]
+    Q[Question] --> D["Retrieve top-k chunks<br/>vector + BM25, fused"]
     C --> D
     D --> E["Prompt<br/>rules + page-labelled excerpts + question"]
     E --> F{Backend}
@@ -123,6 +142,7 @@ pdf_chatbot/
 │   ├── config.py          # Settings from environment variables (validated, no import side effects)
 │   ├── exceptions.py      # Errors whose messages are safe to show to users
 │   ├── logging_config.py  # Logging with API-key redaction
+│   ├── index_store.py     # List, delete and prune stored indexes (also a small CLI)
 │   ├── pdf_engine.py      # Validation, rendering, extraction, chunking, Chroma indexing
 │   ├── llm_engine.py      # Prompt construction, OpenAI and local streaming
 │   ├── chat.py            # One question/answer turn (validate -> index -> retrieve -> generate)
@@ -132,6 +152,25 @@ pdf_chatbot/
 ├── Dockerfile, docker-compose.yml
 └── .github/workflows/ci.yml
 ```
+
+## Managing stored indexes
+
+Each indexed PDF leaves a vector index and an Open Knowledge Format bundle in
+`PDFCHAT_CHROMA_DIR`. They are reused for later questions and restarts, and are rebuilt on
+demand if deleted. The UI has a **Delete this PDF's stored index** button for the PDF that is
+open. Operators can inspect and clean up everything from the command line (inside Docker:
+`docker compose exec pdf-chatbot python -m app.index_store list`):
+
+```bash
+python -m app.index_store list
+python -m app.index_store delete <fingerprint-prefix>      # from the 'list' output
+python -m app.index_store prune --older-than-days 30 --keep 20
+python -m app.index_store clear --yes
+```
+
+Set `PDFCHAT_INDEX_MAX_COUNT` and/or `PDFCHAT_INDEX_MAX_AGE_DAYS` to prune automatically
+after each question. Both are off by default, so nothing is deleted unless you ask for it.
+"Last used" is the time an index was built or last reused.
 
 ## Security and privacy
 
@@ -145,11 +184,13 @@ pdf_chatbot/
   authenticating proxy) and set `PDFCHAT_USE_SERVER_KEY=false`, otherwise anyone who can reach
   the port can use your model and your OpenAI credit; the app logs a warning at startup if so.
   Hiding Gradio's "Use via API" link is cosmetic: authentication is the access control.
-- **Your documents.** With the OpenAI backend, the question and the retrieved excerpts are
-  sent to OpenAI (and, for indexing, the document text is sent to the embeddings API). With the
-  local backend nothing leaves your machine after the model download. Extracted text and
-  embeddings are stored unencrypted in `PDFCHAT_CHROMA_DIR`; delete that directory to remove
-  them. There is no per-user isolation or retention policy.
+- **Your documents.** With the OpenAI backend, the question, the retrieved excerpts and the
+  last few turns of the chat are sent to OpenAI (and, for indexing, the document text is sent
+  to the embeddings API). With the local backend nothing leaves your machine after the model
+  download. Extracted text and embeddings are stored unencrypted in `PDFCHAT_CHROMA_DIR`;
+  delete that directory, or see [Managing stored indexes](#managing-stored-indexes), to
+  remove them. There is no per-user isolation, and by default nothing is deleted
+  automatically.
 - **Telemetry.** Gradio and Chroma usage telemetry are disabled.
 - **Prompt injection.** Excerpts are placed in delimited blocks, tag look-alikes inside them are
   stripped, and the model is told to treat them as untrusted data. This reduces, but cannot
@@ -157,14 +198,18 @@ pdf_chatbot/
 
 ## Limitations
 
-- Each question is answered independently; there is no conversation memory.
-- Only PDFs with selectable text are supported (no OCR); tables and multi-column layouts are
-  extracted as plain text and can come out in a confusing order.
-- Plain similarity search: no re-ranking or hybrid keyword search. Answer quality depends on
-  the chosen model, and small local models hallucinate more than hosted ones. There is no
-  automated answer-quality evaluation in this repository yet.
-- Index builds are serialised in one process, and a PDF's index is kept until you delete the
-  Chroma directory. The app is designed for a single server process and a small number of users.
+- Conversation memory is short: only the last few turns (default 3) are remembered, follow-up
+  questions are resolved by also searching with the previous question, and uploading a new PDF
+  clears the chat. Memory is not stored on the server.
+- Scanned (image-only) pages are read with OCR only when Tesseract is installed, and OCR
+  accuracy depends on the scan (no table structure, no handwriting). Tables and multi-column
+  layouts in text PDFs are extracted as plain text and can come out in a confusing order.
+- Retrieval is vector search merged with BM25 keyword search (no re-ranking). Answer quality
+  depends on the chosen model, and small local models hallucinate more than hosted ones. The
+  repository only evaluates retrieval (see Development), not the quality of generated answers,
+  and that evaluation is small (21 questions on the two demo PDFs).
+- Index builds are serialised in one process, and indexes are kept until you delete them
+  (see [Managing stored indexes](#managing-stored-indexes)) or enable a retention limit. The app is designed for a single server process and a small number of users.
 - Gradio is pinned to the 5.x line; the UI uses APIs that Gradio 6 removed.
 - The local backend on CPU is slow, especially with reasoning mode on.
 
@@ -181,8 +226,16 @@ pytest --cov
   cancellation code with a tiny random-weights model (no downloads). It runs automatically when
   `torch` and `transformers` are installed (`pip install -r requirements-local.txt`) and skips
   otherwise.
-- CI (GitHub Actions) runs lint, the tests on several Python versions, and builds and
-  smoke-tests the Docker image.
+- `python -m evals.retrieval_eval` compares vector, BM25 and hybrid retrieval on 21 labelled
+  questions about the demo PDFs (needs `requirements-local.txt`; the first run downloads the
+  embedding model). Gold pages are found by locating an evidence phrase in the PDF text. On
+  the current set, hybrid beats vector-only at `k=3` and `k=5`, e.g. at `k=3` the hit rate is
+  86% against 62% overall. BM25 alone scores as well or better here because the questions
+  reuse the document's wording, so treat the result as a regression check, not a benchmark.
+  It is not run in CI because it downloads a model.
+- CI (GitHub Actions) runs lint, the tests on several Python versions, the local-model tests,
+  a real-Tesseract OCR test (`pytest -m ocr`), and builds and smoke-tests the Docker image
+  (without the optional OCR and local-model extras).
 
 ## Upgrading from earlier versions
 
@@ -193,4 +246,12 @@ pytest --cov
   `PDFCHAT_HOST=0.0.0.0` for network access.
 - The OpenAI key box is no longer pre-filled from `OPENAI_API_KEY`; the server key is used as a
   silent fallback instead (see `PDFCHAT_USE_SERVER_KEY`).
+- Scanned PDFs are accepted when Tesseract is installed (see OCR above); set `PDFCHAT_OCR=off`
+  for the previous behaviour.
+- Stored indexes can now be deleted from the UI or `python -m app.index_store`, and optional
+  retention limits exist (off by default).
+- Chat now remembers the last few turns (`PDFCHAT_HISTORY_TURNS`, `0` to disable) and
+  uploading or removing a PDF clears the chat.
+- Retrieval is now hybrid (vector + BM25) by default. Set `PDFCHAT_RETRIEVAL_MODE=vector` for
+  the previous embeddings-only behaviour; existing indexes keep working.
 - Indexes are named differently, so an existing `.chromadb/` is not reused. It is safe to delete.

@@ -12,12 +12,23 @@ WORKDIR /app
 # several GB to the image, so it is off by default (OpenAI backend only).
 ARG WITH_LOCAL_MODEL=false
 
+# "true" installs Tesseract (English data) so scanned, image-only PDFs can be read with OCR.
+# It adds roughly 100 MB. For other languages add the matching tesseract-ocr-<lang> package
+# and set PDFCHAT_OCR_LANGUAGE.
+ARG WITH_OCR=false
+
 COPY requirements.txt requirements-local.txt ./
 RUN pip install -r requirements.txt \
     && if [ "$WITH_LOCAL_MODEL" = "true" ]; then \
          pip install torch --index-url https://download.pytorch.org/whl/cpu \
          && pip install -r requirements-local.txt; \
        fi
+
+RUN if [ "$WITH_OCR" = "true" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 COPY app ./app
 COPY run.py ./

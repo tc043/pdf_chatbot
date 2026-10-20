@@ -148,3 +148,68 @@ def test_server_starts_and_serves_the_app(settings):
         assert SERVER_KEY not in body
     finally:
         demo.close()
+
+
+def test_generate_response_passes_earlier_turns_to_the_chat(settings, monkeypatch, make_pdf):
+    seen = {}
+
+    def fake_run_turn(*args, **kwargs):
+        seen["history"] = kwargs.get("history")
+        return iter([chat.TurnUpdate("done")])
+
+    monkeypatch.setattr(chat, "run_turn", fake_run_turn)
+    earlier = [
+        {"role": "user", "content": "first?"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "oops"},
+        {"role": "assistant", "content": "❌ something failed"},
+    ]
+    generate = handler(create_ui(settings), "generate_response")
+    list(
+        generate(
+            earlier, "second?", config.BACKEND_OPENAI, "", make_pdf(SAMPLE_PAGES), 0.3, 256, True, 3
+        )
+    )
+    assert seen["history"] == [("first?", "first answer")]
+
+
+def test_uploading_or_clearing_a_pdf_clears_the_chat(settings):
+    demo = create_ui(settings)
+    chatbot = next(b for b in demo.blocks.values() if getattr(b, "label", None) == "Chat History")
+    clears = [
+        f
+        for f in demo.fns.values()
+        if getattr(f.fn, "__name__", "") == "<lambda>"
+        and [b._id for b in f.outputs] == [chatbot._id]
+    ]
+    assert len(clears) >= 2 and all(f.fn() == [] for f in clears)
+
+
+def test_delete_button_removes_the_stored_index_and_explains_what_happened(
+    settings, make_pdf, fake_embeddings, monkeypatch
+):
+    path = make_pdf(SAMPLE_PAGES)
+    pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=settings)
+    messages = []
+    monkeypatch.setattr(gr, "Info", lambda m: messages.append(("info", m)))
+    monkeypatch.setattr(gr, "Warning", lambda m: messages.append(("warning", m)))
+    delete = handler(create_ui(settings), "delete_stored_index")
+
+    delete(path)
+    delete(path)  # second time: nothing left
+    delete("")
+    assert messages[0] == ("info", "Stored index deleted; it will be rebuilt on the next question.")
+    assert "no stored index" in messages[1][1]
+    assert messages[2] == ("warning", "Upload a PDF first.")
+
+
+def test_delete_button_failure_is_a_friendly_error(settings, make_pdf, monkeypatch):
+    from app import index_store
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("secret path /srv/x")
+
+    monkeypatch.setattr(index_store, "delete_for_pdf", boom)
+    with pytest.raises(gr.Error) as excinfo:
+        handler(create_ui(settings), "delete_stored_index")(make_pdf(SAMPLE_PAGES))
+    assert "secret" not in str(excinfo.value)

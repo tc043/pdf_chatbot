@@ -1,0 +1,33 @@
+[
+  {
+    "pdf": "demo_pdfs/attention_is_all_you_need.pdf",
+    "questions": [
+      {"kind": "exact", "question": "What value of warmup_steps was used for the learning rate schedule?", "evidence": "warmup_steps = 4000"},
+      {"kind": "exact", "question": "What beam size and length penalty were used for beam search?", "evidence": "beam size of 4 and length penalty"},
+      {"kind": "exact", "question": "How large is the shared byte-pair vocabulary for English-German?", "evidence": "about 37000 tokens"},
+      {"kind": "exact", "question": "What BLEU score did the big model get on WMT 2014 English-to-French?", "evidence": "BLEU score of 41.0"},
+      {"kind": "exact", "question": "What are the beta1, beta2 and epsilon values of the Adam optimizer?", "evidence": "β2 = 0.98"},
+      {"kind": "exact", "question": "What is the per-head dimension dk = dv?", "evidence": "dk = dv = dmodel/h = 64"},
+      {"kind": "paraphrase", "question": "How long did the larger variant take to train?", "evidence": "The big models were trained for 300,000 steps"},
+      {"kind": "paraphrase", "question": "Why did the authors pick sine and cosine waves to represent position?", "evidence": "may allow the model to extrapolate to sequence lengths longer"},
+      {"kind": "paraphrase", "question": "Which techniques were used to avoid overfitting?", "evidence": "We employ three types of regularization"},
+      {"kind": "paraphrase", "question": "Which smoothing trick makes the model less certain but scores better?", "evidence": "hurts perplexity, as the model learns to be more unsure"},
+      {"kind": "paraphrase", "question": "How were the final weights obtained from several saved snapshots?", "evidence": "averaging the last 5 checkpoints"}
+    ]
+  },
+  {
+    "pdf": "demo_pdfs/gpt3_paper.pdf",
+    "questions": [
+      {"kind": "exact", "question": "What accuracy does GPT-3 reach on TriviaQA in the few-shot setting?", "evidence": "71.2% in the few-shot setting"},
+      {"kind": "exact", "question": "What is the context window size nctx?", "evidence": "nctx = 2048"},
+      {"kind": "exact", "question": "How many shards of monthly CommonCrawl were used?", "evidence": "41 shards of monthly CommonCrawl"},
+      {"kind": "exact", "question": "What F1 does GPT-3 achieve on CoQA in the few-shot setting?", "evidence": "85.0 F1 in the few-shot setting"},
+      {"kind": "paraphrase", "question": "How was the raw web crawl cleaned up to improve its quality?", "evidence": "based on similarity to a range of high-quality reference"},
+      {"kind": "paraphrase", "question": "Under which conditions was the model evaluated depending on how many demonstrations it sees?", "evidence": "we evaluate GPT-3 under 3 conditions"},
+      {"kind": "paraphrase", "question": "How did the authors decide how many examples to process per optimisation step for each model size?", "evidence": "gradient noise scale"},
+      {"kind": "paraphrase", "question": "What problem arises when benchmark test data shows up in the training corpus?", "evidence": "potential contamination of downstream tasks by"},
+      {"kind": "paraphrase", "question": "Can people tell whether generated press stories were written by a machine?", "evidence": "generate samples of news articles which human evaluators have difficulty"},
+      {"kind": "paraphrase", "question": "Why do bigger networks need lower step sizes?", "evidence": "larger models can typically use a larger batch size, but require a smaller learning"}
+    ]
+  }
+]

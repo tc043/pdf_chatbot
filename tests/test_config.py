@@ -117,3 +117,36 @@ def test_non_finite_numbers_are_rejected(monkeypatch, value):
 def test_timeouts_set_in_code_must_be_positive_and_finite(name, value):
     with pytest.raises(ConfigError, match="positive, finite"):
         config.Settings(**{name: value})
+
+
+def test_retrieval_mode_defaults_to_hybrid_and_is_case_insensitive(monkeypatch):
+    assert config.Settings.from_env().retrieval_mode == config.RETRIEVAL_HYBRID
+    monkeypatch.setenv("PDFCHAT_RETRIEVAL_MODE", "Vector")
+    assert config.Settings.from_env().retrieval_mode == config.RETRIEVAL_VECTOR
+
+
+def test_unknown_retrieval_mode_is_rejected(monkeypatch):
+    monkeypatch.setenv("PDFCHAT_RETRIEVAL_MODE", "magic")
+    with pytest.raises(ConfigError, match="RETRIEVAL_MODE"):
+        config.Settings.from_env()
+
+
+def test_history_turns_default_and_bounds(monkeypatch):
+    assert config.Settings.from_env().history_turns == 3
+    monkeypatch.setenv("PDFCHAT_HISTORY_TURNS", "0")
+    assert config.Settings.from_env().history_turns == 0
+    monkeypatch.setenv("PDFCHAT_HISTORY_TURNS", "99")
+    with pytest.raises(ConfigError, match="HISTORY_TURNS"):
+        config.Settings.from_env()
+
+
+def test_index_retention_is_off_by_default_and_validated(monkeypatch):
+    settings = config.Settings.from_env()
+    assert (settings.index_max_count, settings.index_max_age_days) == (0, 0)
+    monkeypatch.setenv("PDFCHAT_INDEX_MAX_COUNT", "20")
+    monkeypatch.setenv("PDFCHAT_INDEX_MAX_AGE_DAYS", "30")
+    settings = config.Settings.from_env()
+    assert (settings.index_max_count, settings.index_max_age_days) == (20, 30)
+    monkeypatch.setenv("PDFCHAT_INDEX_MAX_COUNT", "-1")
+    with pytest.raises(ConfigError, match="INDEX_MAX_COUNT"):
+        config.Settings.from_env()
