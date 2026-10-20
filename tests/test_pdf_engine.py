@@ -127,6 +127,13 @@ def test_collection_name_changes_with_every_index_input():
     assert len(names) == 6
 
 
+def test_collection_name_changes_with_extraction_version(monkeypatch):
+    args = ("a" * 64, config.BACKEND_OPENAI, "model", 1000, 200)
+    before = pdf_engine.get_collection_name(*args)
+    monkeypatch.setattr(pdf_engine, "EXTRACTION_VERSION", "next")
+    assert pdf_engine.get_collection_name(*args) != before
+
+
 # ------------------------------------------------------------------ embeddings
 
 

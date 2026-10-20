@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 RENDER_DPI = 200
 OKF_VERSION = "0.2"
+# Bump when extraction output changes so cached collections are rebuilt, not reused.
+EXTRACTION_VERSION = "2"
 OKF_PRODUCER = "pdf_chatbot/pymupdf"
 
 # Indexing is CPU/IO heavy and Chroma's persistent client is not designed for
@@ -131,12 +133,13 @@ def get_collection_name(
 
     Keyed on the document *content* rather than its filename, so two different
     PDFs that share a filename never collide and an edited PDF is re-indexed.
-    The embedding model and chunking parameters are part of the key so changing
-    them never reuses vectors of the wrong dimension or granularity.
+    The embedding model, chunking parameters and extraction format version are
+    part of the key so changing them never reuses vectors of the wrong dimension,
+    granularity or text format.
     Result is at most 60 characters and uses only ``[a-z0-9_]``.
     """
     kind = "openai" if backend == config.BACKEND_OPENAI else "local"
-    setup = f"{embedding_model}|{chunk_size}|{chunk_overlap}"
+    setup = f"{embedding_model}|{chunk_size}|{chunk_overlap}|x{EXTRACTION_VERSION}"
     tag = hashlib.sha256(setup.encode("utf-8")).hexdigest()[:8]
     return f"pdf_{fingerprint[:40]}_{kind}_{tag}"
 
