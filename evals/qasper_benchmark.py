@@ -12,7 +12,7 @@ annotation has an evidence paragraph that can be located. Table and figure evide
 ("FLOAT SELECTED"), unanswerable questions, papers that cannot be downloaded and evidence that
 cannot be located are dropped and counted in the output.
 
-Metrics (reported for k = 1, 3, 5, 10, all with 95% bootstrap intervals that resample *papers*,
+Metrics (k = 1, 2, 3, 5, 6, 10; all with 95% bootstrap intervals that resample *papers*,
 because questions about the same paper are not independent):
   * page hit@k: one of the top-k chunks comes from a gold page (what the viewer uses);
   * chunk hit@k: one of the top-k chunks is mostly evidence text (at least half of its word
@@ -78,7 +78,8 @@ SHINGLE = 4  # words per shingle
 PAGE_MIN = 0.2  # a page "holds" an evidence paragraph if it contains this share of its shingles
 MIN_COVER = 0.6  # ...and the pages together must contain at least this share to count as found
 CHUNK_EVIDENCE_MIN = 0.5  # share of a chunk's shingles that must be evidence to be a chunk hit
-KS = (1, 3, 5, 10)
+KS = (1, 2, 3, 5, 6, 10)
+CONTEXT_BUDGET = 3000  # characters of context: k x chunk size, for comparing chunk sizes
 METHODS = ("vector", "bm25", "hybrid")
 BOOTSTRAP_ROUNDS = 2000
 FLOAT_PREFIX = "FLOAT SELECTED"
@@ -510,6 +511,15 @@ def format_report(result: dict[str, Any]) -> str:
                 f"{method} - vector, page@3: {c['mean']:+.1%} [{c['low']:+.1%}, {c['high']:+.1%}]"
             )
         lines.append("")
+    lines.append(f"Equal context budget (k x chunk size = {CONTEXT_BUDGET}), page hit:")
+    for size, data in result["sizes"].items():
+        k = CONTEXT_BUDGET // int(size)
+        for method in METHODS:
+            c = data[method][f"page@{k}"]
+            lines.append(
+                f"  chunk {size:>5} k={k}  {method:<7}"
+                f" {c['mean']:.1%} [{c['low']:.1%}-{c['high']:.1%}]"
+            )
     return "\n".join(lines)
 
 
