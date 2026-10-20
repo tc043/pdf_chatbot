@@ -207,7 +207,8 @@ after each question. Both are off by default, so nothing is deleted unless you a
 - Retrieval is vector search merged with BM25 keyword search (no re-ranking). Answer quality
   depends on the chosen model, and small local models hallucinate more than hosted ones. The
   repository only evaluates retrieval (see Development), not the quality of generated answers,
-  and that evaluation is small (21 questions on the two demo PDFs).
+  and the quick check is small (21 questions on the two demo PDFs); see
+  [docs/benchmark.md](docs/benchmark.md) for the larger benchmark on public papers.
 - Index builds are serialised in one process, and indexes are kept until you delete them
   (see [Managing stored indexes](#managing-stored-indexes)) or enable a retention limit. The app is designed for a single server process and a small number of users.
 - Gradio is pinned to the 5.x line; the UI uses APIs that Gradio 6 removed.
@@ -233,6 +234,10 @@ pytest --cov
   86% against 62% overall. BM25 alone scores as well or better here because the questions
   reuse the document's wording, so treat the result as a regression check, not a benchmark.
   It is not run in CI because it downloads a model.
+- `python -m evals.qasper_benchmark` is the real retrieval benchmark: questions written by other
+  people about real arXiv papers (Qasper, CC BY 4.0), with confidence intervals and chunk-size
+  comparisons. See [docs/benchmark.md](docs/benchmark.md) for the method, how to run it and the
+  results. It downloads data, so it is not run in CI.
 - CI (GitHub Actions) runs lint, the tests on several Python versions, the local-model tests,
   a real-Tesseract OCR test (`pytest -m ocr`), and builds and smoke-tests the Docker image
   (without the optional OCR and local-model extras).
