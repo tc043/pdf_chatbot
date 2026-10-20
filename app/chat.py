@@ -16,7 +16,7 @@ from typing import Any
 
 from langchain_core.documents import Document
 
-from app import config, llm_engine, pdf_engine, retrieval
+from app import config, index_store, llm_engine, pdf_engine, retrieval
 from app.exceptions import PDFChatbotError
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,16 @@ def history_pairs(messages: Sequence[Any] | None, turns: int) -> list[tuple[str,
                 )
             pending = None
     return pairs[-turns:]
+
+
+def _apply_retention(pdf_path: str, settings: config.Settings) -> None:
+    """Enforce the optional index retention limits; a failure must not fail the question."""
+    if not (settings.index_max_age_days or settings.index_max_count):
+        return
+    try:
+        index_store.auto_prune(settings, protect=pdf_engine.file_fingerprint(pdf_path))
+    except Exception:
+        logger.warning("Index retention pass failed", exc_info=True)
 
 
 def _retrieve(
@@ -192,6 +202,7 @@ def _run_turn(
 
     yield TurnUpdate("⏳ Indexing the PDF (first time only)...")
     db = pdf_engine.index_pdf(pdf_path, backend, api_key, settings)
+    _apply_retention(pdf_path, settings)
 
     yield TurnUpdate("🔍 Searching the document...")
     docs = _retrieve(db, question, history, settings)

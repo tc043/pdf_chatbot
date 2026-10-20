@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import os
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -142,6 +143,14 @@ def get_collection_name(
     setup = f"{embedding_model}|{chunk_size}|{chunk_overlap}|x{EXTRACTION_VERSION}"
     tag = hashlib.sha256(setup.encode("utf-8")).hexdigest()[:8]
     return f"pdf_{fingerprint[:40]}_{kind}_{tag}"
+
+
+def _mark_used(fingerprint: str, settings: config.Settings) -> None:
+    """Record that an index was used (the bundle directory's mtime is its 'last used' time)."""
+    try:
+        os.utime(get_bundle_dir(fingerprint, settings))
+    except OSError:
+        logger.debug("Could not update the last-used time of %s", fingerprint[:12])
 
 
 def get_bundle_dir(fingerprint: str, settings: config.Settings | None = None) -> Path:
@@ -504,6 +513,7 @@ def index_pdf(
         )
         if db.get(limit=1)["ids"]:
             logger.info("Reusing existing index %s", name)
+            _mark_used(fingerprint, settings)
             return db
 
         documents = extract_documents(file_path)

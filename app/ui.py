@@ -4,7 +4,7 @@ import logging
 
 import gradio as gr
 
-from app import chat, config, pdf_engine
+from app import chat, config, index_store, pdf_engine
 from app.exceptions import PDFChatbotError
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,10 @@ def create_ui(settings: config.Settings | None = None) -> gr.Blocks:
                     page_label = gr.Markdown("Page 0 of 0", elem_classes="status-msg")
                     next_page_btn = gr.Button("Next Page ▶", elem_classes="custom-btn")
 
+                delete_index_btn = gr.Button(
+                    "Delete this PDF's stored index", size="sm", elem_classes="custom-btn"
+                )
+
                 with gr.Row():
                     page_jump_input = gr.Number(
                         label="Jump to Page", minimum=1, precision=0, step=1, value=1
@@ -253,6 +257,25 @@ def create_ui(settings: config.Settings | None = None) -> gr.Blocks:
         pdf_uploader.clear(fn=lambda: handle_pdf_load(None), outputs=upload_outputs).then(
             fn=lambda: [], outputs=[chatbot]
         )
+
+        def delete_stored_index(path):
+            if not path:
+                gr.Warning("Upload a PDF first.")
+                return
+            try:
+                removed = index_store.delete_for_pdf(path, settings)
+            except Exception as exc:
+                logger.exception("Could not delete the stored index")
+                raise gr.Error(
+                    "The stored index could not be deleted. See the server log."
+                ) from exc
+            gr.Info(
+                "Stored index deleted; it will be rebuilt on the next question."
+                if removed
+                else "There is no stored index for this PDF yet."
+            )
+
+        delete_index_btn.click(fn=delete_stored_index, inputs=[pdf_path])
 
         # Navigation Handlers
         def navigate_page(direction, path, curr, total):

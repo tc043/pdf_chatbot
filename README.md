@@ -92,6 +92,7 @@ Invalid values stop the app at startup with a message naming the variable.
 | `PDFCHAT_LOCAL_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model for the local backend |
 | `PDFCHAT_CHUNK_SIZE` / `PDFCHAT_CHUNK_OVERLAP` | `1000` / `200` | Chunking (characters) |
 | `PDFCHAT_RETRIEVER_K` | `3` | Chunks passed to the model |
+| `PDFCHAT_INDEX_MAX_COUNT` / `PDFCHAT_INDEX_MAX_AGE_DAYS` | `0` / `0` | Optional retention: keep indexes for at most this many PDFs / delete indexes unused this long (`0` = keep everything). The PDF in use is never removed |
 | `PDFCHAT_HISTORY_TURNS` | `3` | Earlier question/answer pairs given to the model for follow-ups (`0` turns memory off) |
 | `PDFCHAT_RETRIEVAL_MODE` | `hybrid` | `hybrid` merges vector search with BM25 keyword search; `vector` uses embeddings only |
 | `PDFCHAT_CHROMA_DIR` | `./.chromadb` | Where the vector index is stored |
@@ -126,6 +127,7 @@ pdf_chatbot/
 │   ├── config.py          # Settings from environment variables (validated, no import side effects)
 │   ├── exceptions.py      # Errors whose messages are safe to show to users
 │   ├── logging_config.py  # Logging with API-key redaction
+│   ├── index_store.py     # List, delete and prune stored indexes (also a small CLI)
 │   ├── pdf_engine.py      # Validation, rendering, extraction, chunking, Chroma indexing
 │   ├── llm_engine.py      # Prompt construction, OpenAI and local streaming
 │   ├── chat.py            # One question/answer turn (validate -> index -> retrieve -> generate)
@@ -135,6 +137,25 @@ pdf_chatbot/
 ├── Dockerfile, docker-compose.yml
 └── .github/workflows/ci.yml
 ```
+
+## Managing stored indexes
+
+Each indexed PDF leaves a vector index and an Open Knowledge Format bundle in
+`PDFCHAT_CHROMA_DIR`. They are reused for later questions and restarts, and are rebuilt on
+demand if deleted. The UI has a **Delete this PDF's stored index** button for the PDF that is
+open. Operators can inspect and clean up everything from the command line (inside Docker:
+`docker compose exec pdf-chatbot python -m app.index_store list`):
+
+```bash
+python -m app.index_store list
+python -m app.index_store delete <fingerprint-prefix>      # from the 'list' output
+python -m app.index_store prune --older-than-days 30 --keep 20
+python -m app.index_store clear --yes
+```
+
+Set `PDFCHAT_INDEX_MAX_COUNT` and/or `PDFCHAT_INDEX_MAX_AGE_DAYS` to prune automatically
+after each question. Both are off by default, so nothing is deleted unless you ask for it.
+"Last used" is the time an index was built or last reused.
 
 ## Security and privacy
 
@@ -148,11 +169,13 @@ pdf_chatbot/
   authenticating proxy) and set `PDFCHAT_USE_SERVER_KEY=false`, otherwise anyone who can reach
   the port can use your model and your OpenAI credit; the app logs a warning at startup if so.
   Hiding Gradio's "Use via API" link is cosmetic: authentication is the access control.
-- **Your documents.** With the OpenAI backend, the question and the retrieved excerpts are
-  sent to OpenAI, together with the last few turns of the chat (and, for indexing, the document text is sent to the embeddings API). With the
-  local backend nothing leaves your machine after the model download. Extracted text and
-  embeddings are stored unencrypted in `PDFCHAT_CHROMA_DIR`; delete that directory to remove
-  them. There is no per-user isolation or retention policy.
+- **Your documents.** With the OpenAI backend, the question, the retrieved excerpts and the
+  last few turns of the chat are sent to OpenAI (and, for indexing, the document text is sent
+  to the embeddings API). With the local backend nothing leaves your machine after the model
+  download. Extracted text and embeddings are stored unencrypted in `PDFCHAT_CHROMA_DIR`;
+  delete that directory, or see [Managing stored indexes](#managing-stored-indexes), to
+  remove them. There is no per-user isolation, and by default nothing is deleted
+  automatically.
 - **Telemetry.** Gradio and Chroma usage telemetry are disabled.
 - **Prompt injection.** Excerpts are placed in delimited blocks, tag look-alikes inside them are
   stripped, and the model is told to treat them as untrusted data. This reduces, but cannot
@@ -169,8 +192,8 @@ pdf_chatbot/
   depends on the chosen model, and small local models hallucinate more than hosted ones. The
   repository only evaluates retrieval (see Development), not the quality of generated answers,
   and that evaluation is small (21 questions on the two demo PDFs).
-- Index builds are serialised in one process, and a PDF's index is kept until you delete the
-  Chroma directory. The app is designed for a single server process and a small number of users.
+- Index builds are serialised in one process, and indexes are kept until you delete them
+  (see [Managing stored indexes](#managing-stored-indexes)) or enable a retention limit. The app is designed for a single server process and a small number of users.
 - Gradio is pinned to the 5.x line; the UI uses APIs that Gradio 6 removed.
 - The local backend on CPU is slow, especially with reasoning mode on.
 
@@ -206,6 +229,8 @@ pytest --cov
   `PDFCHAT_HOST=0.0.0.0` for network access.
 - The OpenAI key box is no longer pre-filled from `OPENAI_API_KEY`; the server key is used as a
   silent fallback instead (see `PDFCHAT_USE_SERVER_KEY`).
+- Stored indexes can now be deleted from the UI or `python -m app.index_store`, and optional
+  retention limits exist (off by default).
 - Chat now remembers the last few turns (`PDFCHAT_HISTORY_TURNS`, `0` to disable) and
   uploading or removing a PDF clears the chat.
 - Retrieval is now hybrid (vector + BM25) by default. Set `PDFCHAT_RETRIEVAL_MODE=vector` for

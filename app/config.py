@@ -103,6 +103,10 @@ class Settings:
     retrieval_mode: str = RETRIEVAL_HYBRID
     history_turns: int = 3  # earlier question/answer pairs given to the model; 0 = none
 
+    # Index retention (0 = keep everything, the default)
+    index_max_count: int = 0  # keep at most this many PDFs' indexes
+    index_max_age_days: int = 0  # delete indexes unused for this many days
+
     # Limits
     max_pdf_mb: int = 25
     max_pdf_pages: int = 300
@@ -170,6 +174,8 @@ class Settings:
             retriever_k=_int("RETRIEVER_K", cls.retriever_k, 1, 20),
             retrieval_mode=_str("RETRIEVAL_MODE", cls.retrieval_mode).lower(),
             history_turns=_int("HISTORY_TURNS", cls.history_turns, 0, 20),
+            index_max_count=_int("INDEX_MAX_COUNT", cls.index_max_count, 0, 100000),
+            index_max_age_days=_int("INDEX_MAX_AGE_DAYS", cls.index_max_age_days, 0, 36500),
             max_pdf_mb=_int("MAX_PDF_MB", cls.max_pdf_mb, 1, 1024),
             max_pdf_pages=_int("MAX_PDF_PAGES", cls.max_pdf_pages, 1, 10000),
             max_question_chars=_int("MAX_QUESTION_CHARS", cls.max_question_chars, 10, 100000),

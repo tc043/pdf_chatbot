@@ -138,3 +138,15 @@ def test_history_turns_default_and_bounds(monkeypatch):
     monkeypatch.setenv("PDFCHAT_HISTORY_TURNS", "99")
     with pytest.raises(ConfigError, match="HISTORY_TURNS"):
         config.Settings.from_env()
+
+
+def test_index_retention_is_off_by_default_and_validated(monkeypatch):
+    settings = config.Settings.from_env()
+    assert (settings.index_max_count, settings.index_max_age_days) == (0, 0)
+    monkeypatch.setenv("PDFCHAT_INDEX_MAX_COUNT", "20")
+    monkeypatch.setenv("PDFCHAT_INDEX_MAX_AGE_DAYS", "30")
+    settings = config.Settings.from_env()
+    assert (settings.index_max_count, settings.index_max_age_days) == (20, 30)
+    monkeypatch.setenv("PDFCHAT_INDEX_MAX_COUNT", "-1")
+    with pytest.raises(ConfigError, match="INDEX_MAX_COUNT"):
+        config.Settings.from_env()
