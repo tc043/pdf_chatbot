@@ -42,10 +42,19 @@ def _page_number(doc: Document) -> int:
         return 1
 
 
+def _excerpt_attrs(doc: Document) -> str:
+    attrs = f'page="{_page_number(doc)}"'
+    concept = doc.metadata.get("okf_concept")
+    if isinstance(concept, str) and concept.strip():
+        clean_concept = _TAG_RE.sub("", concept.strip()).replace('"', "")
+        attrs += f' concept="{clean_concept}"'
+    return attrs
+
+
 def format_rag_prompt(question: str, context_docs: Iterable[Document]) -> str:
     """Build the RAG prompt: rules, delimited excerpts with page numbers, then the question."""
     excerpts = "\n".join(
-        f'<excerpt page="{_page_number(doc)}">\n{_TAG_RE.sub("", doc.page_content)}\n</excerpt>'
+        f"<excerpt {_excerpt_attrs(doc)}>\n{_TAG_RE.sub('', doc.page_content)}\n</excerpt>"
         for doc in context_docs
     )
     return f"{RULES}\n\n<context>\n{excerpts}\n</context>\n\nQuestion: {question.strip()}"

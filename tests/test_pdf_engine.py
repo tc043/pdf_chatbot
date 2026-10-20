@@ -153,11 +153,42 @@ def test_extract_skips_blank_pages_and_keeps_zero_based_page_numbers(make_pdf):
     docs = pdf_engine.extract_documents(make_pdf(["first page", "", "third page"], name="x.pdf"))
     assert [d.metadata["page"] for d in docs] == [0, 2]
     assert docs[0].metadata["source"] == "x.pdf"
+    assert docs[0].metadata["okf_concept"] == "/pages/page_0001"
+    assert docs[1].metadata["okf_concept"] == "/pages/page_0003"
 
 
 def test_extract_rejects_pdfs_without_text(make_pdf):
     with pytest.raises(PDFValidationError, match="OCR"):
         pdf_engine.extract_documents(make_pdf(["", ""]))
+
+
+def test_extract_documents_preserves_pdf_tables_as_markdown(tmp_path):
+    import pymupdf
+
+    pdf_path = tmp_path / "table_doc.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((50, 40), "Quarterly Performance Summary", fontsize=12)
+
+    x0, y0, col_w, row_h = 50, 70, 120, 25
+    for r in range(3):
+        page.draw_line((x0, y0 + r * row_h), (x0 + 2 * col_w, y0 + r * row_h))
+    for c in range(3):
+        page.draw_line((x0 + c * col_w, y0), (x0 + c * col_w, y0 + 2 * row_h))
+    page.insert_text((x0 + 10, y0 + 17), "Metric", fontsize=10)
+    page.insert_text((x0 + col_w + 10, y0 + 17), "Value", fontsize=10)
+    page.insert_text((x0 + 10, y0 + row_h + 17), "Accuracy", fontsize=10)
+    page.insert_text((x0 + col_w + 10, y0 + row_h + 17), "98.4%", fontsize=10)
+    doc.save(pdf_path)
+    doc.close()
+
+    extracted = pdf_engine.extract_documents(str(pdf_path))
+    assert len(extracted) == 1
+    assert extracted[0].metadata["table_count"] >= 1
+    compact = extracted[0].page_content.replace(" ", "")
+    assert "|Metric|Value|" in compact
+    assert "|Accuracy|98.4%|" in compact
+    assert "QuarterlyPerformanceSummary" in compact
 
 
 # -------------------------------------------------------------------- indexing
@@ -186,6 +217,29 @@ def test_index_pdf_builds_a_searchable_index(make_pdf, settings, fake_embeddings
     hits = pdf_engine.retrieve_context(db, target, k=2)
     assert hits[0].page_content == target
     assert hits[0].metadata["page"] == 1
+
+
+def test_index_pdf_writes_conformant_okf_v02_bundle(make_pdf, settings, fake_embeddings):
+    path = make_pdf(SAMPLE_PAGES, name="fruits.pdf")
+    pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=settings)
+
+    fp = pdf_engine.file_fingerprint(path)
+    bundle_dir = pdf_engine.get_bundle_dir(fp, settings)
+
+    assert (bundle_dir / "index.md").is_file()
+    assert (bundle_dir / "document.md").is_file()
+    assert (bundle_dir / "pages" / "index.md").is_file()
+
+    root_index = (bundle_dir / "index.md").read_text(encoding="utf-8")
+    assert 'okf_version: "0.2"' in root_index
+
+    page1 = (bundle_dir / "pages" / "page_0001.md").read_text(encoding="utf-8")
+    assert page1.startswith("---\n")
+    assert 'type: "PDF Page"' in page1
+    assert 'resource: "fruits.pdf#page=1"' in page1
+    assert "status: stable" in page1
+    assert "[Next Page](/pages/page_0002.md)" in page1
+    assert "[Document Overview](/document.md)" in page1
 
 
 def test_chroma_telemetry_is_disabled(make_pdf, settings, fake_embeddings):
