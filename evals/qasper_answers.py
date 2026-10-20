@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import re
 import string
 import sys
@@ -177,6 +178,8 @@ def generate(args: argparse.Namespace) -> int:
         for i in qb.select_papers(papers, args.papers, seed=args.seed)
         if qb.pdf_path(i, "").exists()
     ]
+    # Random order, so stopping early still leaves a random sample of papers.
+    random.Random(args.seed).shuffle(ids)  # noqa: S311
     questions, dropped = qb.prepare_questions("test", ids, "", papers)
     print(f"{len(questions)} questions from {len(ids)} papers ({dropped.kept} kept)", flush=True)
     out = Path(args.out)
