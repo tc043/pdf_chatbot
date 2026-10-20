@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import io
 import json
 import random
@@ -339,7 +340,7 @@ def fetch_pdf(arxiv_id: str, version: str) -> Path | None:
             if exc.code in (429, 503):
                 continue
             return None
-        except (urllib.error.URLError, TimeoutError):
+        except (OSError, http.client.HTTPException):  # resets, timeouts, short reads
             continue
         if data[:5] == b"%PDF-":
             target.write_bytes(data)
