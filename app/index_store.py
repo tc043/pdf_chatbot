@@ -189,6 +189,16 @@ def _format_table(infos: Sequence[IndexInfo]) -> str:
     return "\n".join(lines)
 
 
+def _non_negative_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a whole number") from None
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be 0 or more (0 turns the rule off)")
+    return number
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Manage the stored PDF indexes.")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -196,8 +206,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     delete_cmd = commands.add_parser("delete", help="delete the indexes of one PDF")
     delete_cmd.add_argument("fingerprint", help="fingerprint prefix shown by 'list' (6+ chars)")
     prune_cmd = commands.add_parser("prune", help="delete old or surplus indexes")
-    prune_cmd.add_argument("--older-than-days", type=int, default=0)
-    prune_cmd.add_argument("--keep", type=int, default=0, help="keep only the N newest PDFs")
+    prune_cmd.add_argument("--older-than-days", type=_non_negative_int, default=0)
+    prune_cmd.add_argument(
+        "--keep", type=_non_negative_int, default=0, help="keep only the N newest PDFs"
+    )
     clear_cmd = commands.add_parser("clear", help="delete every stored index")
     clear_cmd.add_argument("--yes", action="store_true", help="confirm the deletion")
     args = parser.parse_args(argv)

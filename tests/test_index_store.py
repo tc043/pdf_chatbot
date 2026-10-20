@@ -214,3 +214,19 @@ def test_age_comparison_uses_timezone_aware_datetimes(build, settings):
     info = index_store.list_indexes(settings)[0]
     assert info.last_used.tzinfo is not None
     assert info.last_used <= dt.datetime.now(dt.timezone.utc)
+
+
+@pytest.mark.parametrize("argv", [["prune", "--older-than-days", "-1"], ["prune", "--keep", "-3"]])
+def test_cli_rejects_negative_prune_limits_instead_of_deleting_everything(
+    build, settings, monkeypatch, argv
+):
+    _, fingerprint = build()
+    age(settings, fingerprint, 1)
+    with pytest.raises(SystemExit):
+        run_cli(settings, monkeypatch, *argv)
+    assert len(index_store.list_indexes(settings)) == 1
+
+
+def test_cli_rejects_non_numeric_prune_limits(settings, monkeypatch):
+    with pytest.raises(SystemExit):
+        run_cli(settings, monkeypatch, "prune", "--keep", "many")

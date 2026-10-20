@@ -10,6 +10,7 @@ works the same for freshly built and reused collections and needs no extra files
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 import threading
@@ -100,7 +101,10 @@ def _keyword_index(db: Chroma) -> BM25Index:
     stored = db.get(include=["documents", "metadatas"])
     texts = stored.get("documents") or []
     metadatas = stored.get("metadatas") or [{}] * len(texts)
-    digest = hashlib.sha1("\x00".join(texts).encode("utf-8"), usedforsecurity=False).hexdigest()
+    # The key covers the metadata too: two PDFs can share every chunk's text but differ in
+    # page numbers (an extra cover page), and must not share cached documents.
+    payload = json.dumps([texts, metadatas], sort_keys=True, default=str)
+    digest = hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
     with _cache_lock:
         cached = _cache.get(digest)
     if cached is not None:

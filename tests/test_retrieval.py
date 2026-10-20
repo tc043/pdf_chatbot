@@ -131,3 +131,25 @@ def test_hybrid_failure_building_the_keyword_index_is_wrapped(indexed, monkeypat
     monkeypatch.setattr(indexed, "get", boom)
     with pytest.raises(RetrievalError):
         pdf_engine.retrieve_context(indexed, "fruit", k=2, mode=config.RETRIEVAL_HYBRID)
+
+
+def test_keyword_cache_does_not_mix_up_pdfs_with_identical_text_but_different_pages(
+    indexed, monkeypatch
+):
+    monkeypatch.setattr(retrieval, "_cache", {})
+    texts = ["alpha text", "beta text"]
+
+    def stored(pages):
+        return lambda include=None: {
+            "documents": texts,
+            "metadatas": [{"page": page} for page in pages],
+        }
+
+    monkeypatch.setattr(indexed, "get", stored([0, 1]))
+    first = retrieval._keyword_index(indexed)
+    # The same chunks after an extra cover page was added: every page number shifts by one.
+    monkeypatch.setattr(indexed, "get", stored([1, 2]))
+    second = retrieval._keyword_index(indexed)
+    assert second is not first
+    assert [d.metadata["page"] for d in second.search("alpha", 1)] == [1]
+    assert [d.metadata["page"] for d in first.search("alpha", 1)] == [0]
