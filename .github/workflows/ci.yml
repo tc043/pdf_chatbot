@@ -43,6 +43,34 @@ jobs:
       - name: Test
         run: pytest --cov --cov-report=term-missing --cov-fail-under=85
 
+  # The test matrix above skips the local_model tests (torch is not installed). This job
+  # installs the optional local-backend dependencies so bumps to requirements-local.txt
+  # (torch, transformers, ...) are actually resolved and exercised.
+  local-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      # CPU-only PyTorch first (same as the Dockerfile) so the GPU build is never pulled in.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-local.txt -r requirements-dev.txt
+          pip check
+
+      - name: Import local-backend packages
+        run: python -c "import torch, transformers, sentence_transformers, langchain_huggingface"
+
+      - name: Test
+        run: pytest -m local_model --no-cov
+
   docker:
     runs-on: ubuntu-latest
     steps:
