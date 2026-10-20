@@ -264,7 +264,11 @@ pytest --cov
 - `python -m evals.qasper_benchmark` is the real retrieval benchmark: questions written by other
   people about real arXiv papers (Qasper, CC BY 4.0), with confidence intervals and chunk-size
   comparisons. See [docs/benchmark.md](docs/benchmark.md) for the method, how to run it and the
-  results. It downloads data, so it is not run in CI.
+  results. On the 1270 test questions hybrid retrieval is at least as good as vector-only
+  (page hit@3 73.6% against 72.2%, a difference within noise at the default chunk size), and
+  500-character chunks with `k=6` find the evidence page more often than 1000 with `k=3`
+  (86.6% against 73.6%) at the same amount of text; that is a recommendation, not yet the
+  default. It downloads data, so it is not run in CI.
 - CI (GitHub Actions) runs lint, the tests on several Python versions, the local-model tests,
   a real-Tesseract OCR test (`pytest -m ocr`), and builds and smoke-tests the Docker image
   (without the optional OCR and local-model extras).

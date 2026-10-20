@@ -55,15 +55,16 @@ equal context budget (k × chunk size = 3000 characters), are **paired** per que
 pip install -r requirements.txt -r requirements-local.txt
 python -m evals.qasper_benchmark fetch   --split validation --limit 40
 python -m evals.qasper_benchmark inspect --split validation --limit 40
-python -m evals.qasper_benchmark run     --split validation --limit 40 --out qasper_results_validation.json
+python -m evals.qasper_benchmark run     --split validation --limit 40 --out evals/results/qasper_validation.json
 python -m evals.qasper_benchmark fetch   --split test
-python -m evals.qasper_benchmark run     --split test --out qasper_results_test.json
+python -m evals.qasper_benchmark run     --split test --out evals/results/qasper_test.json
 ```
 
-Embeddings are local (`all-MiniLM-L6-v2`), so no API key is needed. Expect the test split
-(416 papers) to take about 30 minutes to download and a few more to index on CPU. It is not run
-in CI because it downloads data. The result JSON records the commit, embedding model, counts
-kept and dropped, and every number in the tables.
+Embeddings are local (`all-MiniLM-L6-v2`), so no API key is needed. On 4 CPU cores the test
+split took about 45 minutes to download and about 2 hours to index and score (three chunk
+sizes); the 40-paper validation run took about 25 minutes. It is not run in CI because it
+downloads data. The result JSON (kept in `evals/results/`) records the commit, embedding model,
+counts kept and dropped, and every number in the tables.
 
 ## Protocol
 
@@ -81,7 +82,47 @@ split was scored, and the test split is scored once:
 
 ## Results
 
-Test results are added here after the test split is scored.
+Scored once, on the Qasper **test** split with the rules above. 1270 of 1451 questions from 400
+papers were kept (79 unanswerable, 62 with only table/figure or heading evidence, 34 whose
+evidence could not be located in the PDF, 6 from 2 papers that failed to download). 92.2% of
+evidence paragraphs were located. Embeddings: `all-MiniLM-L6-v2`. Intervals are 95%, resampling
+papers. Validation (100 questions, 38 papers) is in `evals/results/qasper_validation.json`.
+
+**Retrieval mode, default chunk size (1000), page hit:**
+
+| | vector | BM25 | hybrid |
+|---|---|---|---|
+| @1 | 46.2% | 38.8% | 47.3% |
+| @3 | 72.2% [69.4–74.9] | 67.1% [64.1–70.1] | 73.6% [71.1–76.2] |
+| @5 | 82.8% | 79.7% | 85.0% |
+| @10 | 93.9% | 92.7% | 95.5% |
+| MRR@10 | 61.7% | 55.6% | 62.8% |
+
+- **Hybrid vs vector, page hit@3 (paired):** +1.4% [-0.9, +3.6] at size 1000, +2.2% [-0.1, +4.7]
+  at 500 and +3.3% [+0.9, +5.7] at 1500. Hybrid is never significantly worse, so by rule 1 it
+  stays the default. Its edge at the default settings is small: at @3 it is within noise, and
+  it is clearer at @5 (+2.3% [+0.1, +4.4]) and @10 (+1.6% [+0.2, +2.9]).
+- **BM25 alone** is 4.6–5.3 points below vector at @3 (intervals exclude zero), as expected for
+  questions that were not written from the paper's wording.
+
+**Chunk size at an equal context budget (k × size = 3000 characters), hybrid, page hit:**
+
+| chunk size, k | page hit | vs 1000, k=3 (paired) |
+|---|---|---|
+| 500, k=6 | 86.6% [84.6–88.6] | **+13.0%** [+10.9, +15.1] |
+| 1000, k=3 (default) | 73.6% [71.1–76.2] | - |
+| 1500, k=2 | 64.3% [61.4–67.1] | -9.4% [-11.6, -7.1] |
+
+Validation agrees (500/k=6 was +10.0% [+2.0, +17.9]; 1500/k=2 was -8.0% [-15.5, -1.8]), so
+rule 2 is met: **smaller chunks with more of them retrieve the evidence page more often at the
+same amount of text.** The same holds for vector and BM25. As an exploratory check (not part of
+the rule), the strict chunk-level hit rate also favours 500/k=6 (55.8%) over 1000/k=3 (31.3%).
+
+What this does **not** show: that answers improve. More, smaller chunks make a page hit easier
+by covering more places, and each prompt then contains six excerpts instead of three. Changing
+the default would also re-index every stored PDF and change `PDFCHAT_RETRIEVER_K`. The default
+is therefore **not** changed here; 500 characters with k=6 is a recommendation to evaluate on
+answer quality first.
 
 ## Limitations of this benchmark
 
