@@ -9,6 +9,10 @@ updates:
       # Gradio 6 removed APIs this UI uses; migrate deliberately rather than via a bot PR.
       - dependency-name: gradio
         update-types: ["version-update:semver-major"]
+      # Every Gradio 5.x release requires pillow<12, so pillow 12 cannot be
+      # installed alongside gradio<6. Revisit together with the Gradio 6 migration.
+      - dependency-name: pillow
+        versions: [">=12"]
 
   - package-ecosystem: github-actions
     directory: /
