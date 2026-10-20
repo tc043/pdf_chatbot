@@ -101,6 +101,7 @@ class Settings:
     chunk_overlap: int = 200
     retriever_k: int = 3
     retrieval_mode: str = RETRIEVAL_HYBRID
+    history_turns: int = 3  # earlier question/answer pairs given to the model; 0 = none
 
     # Limits
     max_pdf_mb: int = 25
@@ -168,6 +169,7 @@ class Settings:
             chunk_overlap=_int("CHUNK_OVERLAP", cls.chunk_overlap, 0, 10000),
             retriever_k=_int("RETRIEVER_K", cls.retriever_k, 1, 20),
             retrieval_mode=_str("RETRIEVAL_MODE", cls.retrieval_mode).lower(),
+            history_turns=_int("HISTORY_TURNS", cls.history_turns, 0, 20),
             max_pdf_mb=_int("MAX_PDF_MB", cls.max_pdf_mb, 1, 1024),
             max_pdf_pages=_int("MAX_PDF_PAGES", cls.max_pdf_pages, 1, 10000),
             max_question_chars=_int("MAX_QUESTION_CHARS", cls.max_question_chars, 10, 100000),

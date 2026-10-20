@@ -148,3 +148,38 @@ def test_server_starts_and_serves_the_app(settings):
         assert SERVER_KEY not in body
     finally:
         demo.close()
+
+
+def test_generate_response_passes_earlier_turns_to_the_chat(settings, monkeypatch, make_pdf):
+    seen = {}
+
+    def fake_run_turn(*args, **kwargs):
+        seen["history"] = kwargs.get("history")
+        return iter([chat.TurnUpdate("done")])
+
+    monkeypatch.setattr(chat, "run_turn", fake_run_turn)
+    earlier = [
+        {"role": "user", "content": "first?"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "oops"},
+        {"role": "assistant", "content": "❌ something failed"},
+    ]
+    generate = handler(create_ui(settings), "generate_response")
+    list(
+        generate(
+            earlier, "second?", config.BACKEND_OPENAI, "", make_pdf(SAMPLE_PAGES), 0.3, 256, True, 3
+        )
+    )
+    assert seen["history"] == [("first?", "first answer")]
+
+
+def test_uploading_or_clearing_a_pdf_clears_the_chat(settings):
+    demo = create_ui(settings)
+    chatbot = next(b for b in demo.blocks.values() if getattr(b, "label", None) == "Chat History")
+    clears = [
+        f
+        for f in demo.fns.values()
+        if getattr(f.fn, "__name__", "") == "<lambda>"
+        and [b._id for b in f.outputs] == [chatbot._id]
+    ]
+    assert len(clears) >= 2 and all(f.fn() == [] for f in clears)

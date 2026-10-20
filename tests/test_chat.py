@@ -183,3 +183,105 @@ def test_local_backend_warns_about_first_use_download(pipeline, settings, monkey
     assert any("Loading the local model" in u.content for u in updates)
     assert updates[-1].content == "ok" and seen["thinking"] is True
     assert pipeline["index_keys"] == [""]  # local backend never needs an API key
+
+
+# ---------------------------------------------------------------------- memory
+
+
+def msgs(*pairs):
+    out = []
+    for user, answer in pairs:
+        out.append({"role": "user", "content": user})
+        out.append({"role": "assistant", "content": answer})
+    return out
+
+
+def test_history_pairs_keeps_the_last_n_good_turns_in_order():
+    messages = msgs(("q1", "a1"), ("q2", "a2"), ("q3", "a3"), ("q4", "a4"))
+    assert chat.history_pairs(messages, 2) == [("q3", "a3"), ("q4", "a4")]
+
+
+def test_history_pairs_is_empty_when_memory_is_off_or_there_is_no_chat():
+    assert chat.history_pairs(msgs(("q", "a")), 0) == []
+    assert chat.history_pairs(None, 3) == [] and chat.history_pairs([], 3) == []
+
+
+def test_history_pairs_drops_errors_progress_and_unanswered_questions():
+    messages = [
+        *msgs(
+            ("bad", "❌ Please provide an OpenAI API key"),
+            ("slow", "⏳ Indexing the PDF"),
+            ("empty", "  "),
+            ("good", "A real answer."),
+        ),
+        {"role": "user", "content": "in progress"},
+        {"role": "assistant", "content": ""},
+    ]
+    assert chat.history_pairs(messages, 5) == [("good", "A real answer.")]
+
+
+def test_history_pairs_removes_reasoning_even_when_it_was_cut_off():
+    messages = msgs(("q1", "<think>hmm\nsecret</think>The answer."), ("q2", "<think>unfinished"))
+    assert chat.history_pairs(messages, 5) == [("q1", "The answer.")]
+
+
+def test_history_pairs_truncates_long_text_and_tolerates_odd_content():
+    long = "x" * 5000
+    ((question, answer),) = chat.history_pairs(msgs((long, long)), 3)
+    assert len(question) == chat.HISTORY_QUESTION_CHARS and question.endswith("…")
+    assert len(answer) == chat.HISTORY_ANSWER_CHARS
+    odd = [
+        {"role": "user", "content": [{"text": "block question"}, "tail"]},
+        {"role": "assistant", "content": {"text": "dict answer"}},
+        {"role": "user", "content": 5},
+        {"role": "assistant", "content": "ignored: no question text"},
+        "not a message",
+    ]
+    assert chat.history_pairs(odd, 3) == [("block question tail", "dict answer")]
+
+
+def test_history_reaches_the_prompt_and_follow_ups_search_with_the_previous_question(
+    pipeline, settings, monkeypatch
+):
+    queries = []
+
+    def retrieve(db, question, k, mode=None):
+        queries.append(question)
+        return pipeline["docs"]
+
+    monkeypatch.setattr(pdf_engine, "retrieve_context", retrieve)
+    updates = list(
+        chat.run_turn(
+            "and its cost?",
+            "/x.pdf",
+            config.BACKEND_OPENAI,
+            "sk-u",
+            0.3,
+            256,
+            True,
+            settings,
+            history=[("What is alpha?", "A letter.")],
+        )
+    )
+    assert not any(u.is_error for u in updates)
+    assert queries == ["and its cost?", "What is alpha? and its cost?"]
+    assert "User: What is alpha?\nAssistant: A letter." in pipeline["prompt"]
+
+
+def test_first_question_searches_once_and_has_no_history_block(pipeline, settings, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        pdf_engine, "retrieve_context", lambda *a, **k: calls.append(a[1]) or pipeline["docs"]
+    )
+    run(settings)
+    assert len(calls) == 1 and "<history>" not in pipeline["prompt"]
+
+
+def test_follow_up_ranking_prefers_chunks_found_by_both_searches(settings, monkeypatch):
+    a, b, c, d = (Document(page_content=x, metadata={"page": i}) for i, x in enumerate("abcd"))
+    results = {"cost?": [a, b, c], "alpha cost?": [d, b, a]}
+    monkeypatch.setattr(pdf_engine, "retrieve_context", lambda db, q, k, mode=None: results[q])
+    fused = chat._retrieve("db", "cost?", [("alpha", "x")], settings)
+    # a and b were found by both searches, so they outrank d (previous-question search only);
+    # c (current-question search only, ranked lower) is displaced.
+    assert [doc.page_content for doc in fused] == ["a", "b", "d"]

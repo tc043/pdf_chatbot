@@ -23,6 +23,7 @@ Vectors are stored locally in [Chroma](https://www.trychroma.com/); the UI is bu
 
 - **Two backends**, switchable in the UI: OpenAI chat models or the local MiniCPM5-1B-SFT
   (with its Think / No-Think reasoning toggle).
+- **Follow-up questions**: the last few turns are remembered, so "what about its cost?" works.
 - **Page-aware answers**: excerpts are labelled with page numbers, the model is asked to cite
   them, and the page viewer jumps to the best-matching page.
 - **Interactive page viewer** with previous/next and jump-to-page.
@@ -91,6 +92,7 @@ Invalid values stop the app at startup with a message naming the variable.
 | `PDFCHAT_LOCAL_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model for the local backend |
 | `PDFCHAT_CHUNK_SIZE` / `PDFCHAT_CHUNK_OVERLAP` | `1000` / `200` | Chunking (characters) |
 | `PDFCHAT_RETRIEVER_K` | `3` | Chunks passed to the model |
+| `PDFCHAT_HISTORY_TURNS` | `3` | Earlier question/answer pairs given to the model for follow-ups (`0` turns memory off) |
 | `PDFCHAT_RETRIEVAL_MODE` | `hybrid` | `hybrid` merges vector search with BM25 keyword search; `vector` uses embeddings only |
 | `PDFCHAT_CHROMA_DIR` | `./.chromadb` | Where the vector index is stored |
 | `PDFCHAT_MAX_PDF_MB` / `PDFCHAT_MAX_PDF_PAGES` | `25` / `300` | Upload limits |
@@ -147,7 +149,7 @@ pdf_chatbot/
   the port can use your model and your OpenAI credit; the app logs a warning at startup if so.
   Hiding Gradio's "Use via API" link is cosmetic: authentication is the access control.
 - **Your documents.** With the OpenAI backend, the question and the retrieved excerpts are
-  sent to OpenAI (and, for indexing, the document text is sent to the embeddings API). With the
+  sent to OpenAI, together with the last few turns of the chat (and, for indexing, the document text is sent to the embeddings API). With the
   local backend nothing leaves your machine after the model download. Extracted text and
   embeddings are stored unencrypted in `PDFCHAT_CHROMA_DIR`; delete that directory to remove
   them. There is no per-user isolation or retention policy.
@@ -158,7 +160,9 @@ pdf_chatbot/
 
 ## Limitations
 
-- Each question is answered independently; there is no conversation memory.
+- Conversation memory is short: only the last few turns (default 3) are remembered, follow-up
+  questions are resolved by also searching with the previous question, and uploading a new PDF
+  clears the chat. Memory is not stored on the server.
 - Only PDFs with selectable text are supported (no OCR); tables and multi-column layouts are
   extracted as plain text and can come out in a confusing order.
 - Retrieval is vector search merged with BM25 keyword search (no re-ranking). Answer quality
@@ -202,6 +206,8 @@ pytest --cov
   `PDFCHAT_HOST=0.0.0.0` for network access.
 - The OpenAI key box is no longer pre-filled from `OPENAI_API_KEY`; the server key is used as a
   silent fallback instead (see `PDFCHAT_USE_SERVER_KEY`).
+- Chat now remembers the last few turns (`PDFCHAT_HISTORY_TURNS`, `0` to disable) and
+  uploading or removing a PDF clears the chat.
 - Retrieval is now hybrid (vector + BM25) by default. Set `PDFCHAT_RETRIEVAL_MODE=vector` for
   the previous embeddings-only behaviour; existing indexes keep working.
 - Indexes are named differently, so an existing `.chromadb/` is not reused. It is safe to delete.

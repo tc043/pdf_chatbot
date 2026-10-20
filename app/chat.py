@@ -8,14 +8,24 @@ unit-testable and keeps secrets out of process-global state.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from typing import Any
 
-from app import config, llm_engine, pdf_engine
+from langchain_core.documents import Document
+
+from app import config, llm_engine, pdf_engine, retrieval
 from app.exceptions import PDFChatbotError
 
 logger = logging.getLogger(__name__)
+
+ERROR_PREFIX = "❌ "
+# The local model has a small context window, so remembered turns are truncated.
+HISTORY_QUESTION_CHARS = 500
+HISTORY_ANSWER_CHARS = 1000
+_REASONING_RE = re.compile(r"<think>.*?(?:</think>|\Z)", re.DOTALL | re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -42,7 +52,69 @@ def resolve_openai_key(user_key: str | None, settings: config.Settings) -> str:
 
 
 def _error(message: str) -> TurnUpdate:
-    return TurnUpdate(content=f"❌ {message}", is_error=True)
+    return TurnUpdate(content=f"{ERROR_PREFIX}{message}", is_error=True)
+
+
+def _message_text(content: Any) -> str:
+    """Gradio message content is usually a string but can be a list of blocks or a dict."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        return str(content.get("text") or "")
+    if isinstance(content, (list, tuple)):
+        return " ".join(_message_text(part) for part in content)
+    return ""
+
+
+def _truncate(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def history_pairs(messages: Sequence[Any] | None, turns: int) -> list[tuple[str, str]]:
+    """Turn Gradio chat messages into the last ``turns`` (question, answer) pairs.
+
+    Pairs whose answer is an error, a progress message or empty are dropped, as is a trailing
+    question without an answer. The local model's ``<think>`` reasoning is not remembered.
+    """
+    if turns <= 0:
+        return []
+    pairs: list[tuple[str, str]] = []
+    pending: str | None = None
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        text = _message_text(message.get("content")).strip()
+        if message.get("role") == "user":
+            pending = text
+        elif message.get("role") == "assistant" and pending is not None:
+            answer = _REASONING_RE.sub("", text).strip()
+            if pending and answer and not answer.startswith((ERROR_PREFIX, "⏳", "🔍", "✍️")):
+                pairs.append(
+                    (
+                        _truncate(pending, HISTORY_QUESTION_CHARS),
+                        _truncate(answer, HISTORY_ANSWER_CHARS),
+                    )
+                )
+            pending = None
+    return pairs[-turns:]
+
+
+def _retrieve(
+    db: Any, question: str, history: Sequence[tuple[str, str]], settings: config.Settings
+) -> list[Document]:
+    """Retrieve context, also searching with the previous question for follow-ups.
+
+    A follow-up such as "what about its cost?" has too little to search on. The question is
+    searched alone and together with the previous question, and the two rankings are fused
+    (the question alone is ranked first), so a change of topic cannot drown the new question.
+    """
+    k = settings.retriever_k
+    mode = settings.retrieval_mode
+    docs = pdf_engine.retrieve_context(db, question, k, mode=mode)
+    if not history:
+        return docs
+    previous = pdf_engine.retrieve_context(db, f"{history[-1][0]} {question}", k, mode=mode)
+    return retrieval.reciprocal_rank_fusion([docs, previous], k)
 
 
 def run_turn(
@@ -54,8 +126,12 @@ def run_turn(
     max_tokens: int,
     enable_thinking: bool,
     settings: config.Settings | None = None,
+    history: Sequence[tuple[str, str]] | None = None,
 ) -> Iterator[TurnUpdate]:
-    """Answer ``question`` about the PDF at ``pdf_path``, yielding progress and then text."""
+    """Answer ``question`` about the PDF at ``pdf_path``, yielding progress and then text.
+
+    ``history`` holds earlier (question, answer) pairs from :func:`history_pairs`.
+    """
     settings = settings or config.get_settings()
     try:
         yield from _run_turn(
@@ -67,6 +143,7 @@ def run_turn(
             max_tokens,
             enable_thinking,
             settings,
+            history or (),
         )
     except PDFChatbotError as exc:
         yield _error(str(exc))
@@ -85,6 +162,7 @@ def _run_turn(
     max_tokens: int,
     enable_thinking: bool,
     settings: config.Settings,
+    history: Sequence[tuple[str, str]],
 ) -> Iterator[TurnUpdate]:
     question = (question or "").strip()
     if not question:
@@ -116,15 +194,13 @@ def _run_turn(
     db = pdf_engine.index_pdf(pdf_path, backend, api_key, settings)
 
     yield TurnUpdate("🔍 Searching the document...")
-    docs = pdf_engine.retrieve_context(
-        db, question, settings.retriever_k, mode=settings.retrieval_mode
-    )
+    docs = _retrieve(db, question, history, settings)
     if not docs:
         yield _error("No relevant context could be found in the PDF.")
         return
 
     best_page = int(docs[0].metadata.get("page", 0))
-    prompt = llm_engine.format_rag_prompt(question, docs)
+    prompt = llm_engine.format_rag_prompt(question, docs, history)
 
     if (
         backend == config.BACKEND_LOCAL

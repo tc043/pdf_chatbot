@@ -245,8 +245,14 @@ def create_ui(settings: config.Settings | None = None) -> gr.Blocks:
             page_label,
             page_jump_input,
         ]
-        pdf_uploader.upload(fn=handle_pdf_load, inputs=[pdf_uploader], outputs=upload_outputs)
-        pdf_uploader.clear(fn=lambda: handle_pdf_load(None), outputs=upload_outputs)
+        # A new (or removed) document starts a new conversation; follow-up questions must not
+        # refer to the previous PDF. ``.success`` keeps the chat when an upload is rejected.
+        pdf_uploader.upload(
+            fn=handle_pdf_load, inputs=[pdf_uploader], outputs=upload_outputs
+        ).success(fn=lambda: [], outputs=[chatbot])
+        pdf_uploader.clear(fn=lambda: handle_pdf_load(None), outputs=upload_outputs).then(
+            fn=lambda: [], outputs=[chatbot]
+        )
 
         # Navigation Handlers
         def navigate_page(direction, path, curr, total):
@@ -297,6 +303,7 @@ def create_ui(settings: config.Settings | None = None) -> gr.Blocks:
                 yield (gr.skip(),) * 6
                 return
 
+            earlier = chat.history_pairs(history, settings.history_turns)
             history = list(history or [])
             history.append({"role": "user", "content": question})
             history.append({"role": "assistant", "content": ""})
@@ -304,7 +311,15 @@ def create_ui(settings: config.Settings | None = None) -> gr.Blocks:
 
             shown_page = None
             updates = chat.run_turn(
-                question, path, model_sel, openai_key, temp, int(max_toks), think_mode, settings
+                question,
+                path,
+                model_sel,
+                openai_key,
+                temp,
+                int(max_toks),
+                think_mode,
+                settings,
+                history=earlier,
             )
             for update in updates:
                 history[-1] = {"role": "assistant", "content": update.content}

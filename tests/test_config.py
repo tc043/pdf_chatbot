@@ -129,3 +129,12 @@ def test_unknown_retrieval_mode_is_rejected(monkeypatch):
     monkeypatch.setenv("PDFCHAT_RETRIEVAL_MODE", "magic")
     with pytest.raises(ConfigError, match="RETRIEVAL_MODE"):
         config.Settings.from_env()
+
+
+def test_history_turns_default_and_bounds(monkeypatch):
+    assert config.Settings.from_env().history_turns == 3
+    monkeypatch.setenv("PDFCHAT_HISTORY_TURNS", "0")
+    assert config.Settings.from_env().history_turns == 0
+    monkeypatch.setenv("PDFCHAT_HISTORY_TURNS", "99")
+    with pytest.raises(ConfigError, match="HISTORY_TURNS"):
+        config.Settings.from_env()
