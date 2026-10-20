@@ -116,7 +116,9 @@ def _run_turn(
     db = pdf_engine.index_pdf(pdf_path, backend, api_key, settings)
 
     yield TurnUpdate("🔍 Searching the document...")
-    docs = pdf_engine.retrieve_context(db, question, settings.retriever_k)
+    docs = pdf_engine.retrieve_context(
+        db, question, settings.retriever_k, mode=settings.retrieval_mode
+    )
     if not docs:
         yield _error("No relevant context could be found in the PDF.")
         return

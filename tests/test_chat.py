@@ -21,8 +21,9 @@ def pipeline(monkeypatch):
         state["index_keys"].append(key)
         return "db"
 
-    def retrieve(db, question, k):
+    def retrieve(db, question, k, mode=None):
         state["k"] = k
+        state["mode"] = mode
         return state["docs"]
 
     def openai_stream(prompt, key, temperature, max_tokens, settings=None):
@@ -59,6 +60,7 @@ def test_happy_path_streams_progress_then_answer(pipeline, settings):
     assert [u.page for u in updates][:2] == [None, None]
     assert all(u.page == 2 for u in updates[2:])
     assert pipeline["k"] == settings.retriever_k
+    assert pipeline["mode"] == settings.retrieval_mode
     assert "alpha" in pipeline["prompt"] and "What is alpha?" in pipeline["prompt"]
 
 

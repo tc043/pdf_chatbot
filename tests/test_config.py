@@ -117,3 +117,15 @@ def test_non_finite_numbers_are_rejected(monkeypatch, value):
 def test_timeouts_set_in_code_must_be_positive_and_finite(name, value):
     with pytest.raises(ConfigError, match="positive, finite"):
         config.Settings(**{name: value})
+
+
+def test_retrieval_mode_defaults_to_hybrid_and_is_case_insensitive(monkeypatch):
+    assert config.Settings.from_env().retrieval_mode == config.RETRIEVAL_HYBRID
+    monkeypatch.setenv("PDFCHAT_RETRIEVAL_MODE", "Vector")
+    assert config.Settings.from_env().retrieval_mode == config.RETRIEVAL_VECTOR
+
+
+def test_unknown_retrieval_mode_is_rejected(monkeypatch):
+    monkeypatch.setenv("PDFCHAT_RETRIEVAL_MODE", "magic")
+    with pytest.raises(ConfigError, match="RETRIEVAL_MODE"):
+        config.Settings.from_env()

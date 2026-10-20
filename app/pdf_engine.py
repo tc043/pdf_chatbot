@@ -16,7 +16,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from PIL import Image
 
-from app import config
+from app import config, retrieval
 from app.exceptions import (
     IndexingError,
     ModelUnavailableError,
@@ -528,10 +528,12 @@ def index_pdf(
     return db
 
 
-def retrieve_context(db: Chroma, question: str, k: int) -> list[Document]:
-    """Return the ``k`` chunks most similar to ``question``."""
+def retrieve_context(
+    db: Chroma, question: str, k: int, mode: str = config.RETRIEVAL_VECTOR
+) -> list[Document]:
+    """Return the ``k`` best chunks for ``question`` (vector search, or hybrid with BM25)."""
     try:
-        return db.similarity_search(question, k=k)
+        return retrieval.search(db, question, k, mode)
     except Exception as exc:
         logger.exception("Retrieval failed")
         translated = wrap_provider_error(exc, "search the document")

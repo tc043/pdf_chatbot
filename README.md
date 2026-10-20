@@ -91,6 +91,7 @@ Invalid values stop the app at startup with a message naming the variable.
 | `PDFCHAT_LOCAL_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model for the local backend |
 | `PDFCHAT_CHUNK_SIZE` / `PDFCHAT_CHUNK_OVERLAP` | `1000` / `200` | Chunking (characters) |
 | `PDFCHAT_RETRIEVER_K` | `3` | Chunks passed to the model |
+| `PDFCHAT_RETRIEVAL_MODE` | `hybrid` | `hybrid` merges vector search with BM25 keyword search; `vector` uses embeddings only |
 | `PDFCHAT_CHROMA_DIR` | `./.chromadb` | Where the vector index is stored |
 | `PDFCHAT_MAX_PDF_MB` / `PDFCHAT_MAX_PDF_PAGES` | `25` / `300` | Upload limits |
 | `PDFCHAT_MAX_QUESTION_CHARS` | `2000` | Question length limit |
@@ -108,7 +109,7 @@ mixing incompatible vectors.
 flowchart LR
     A[Upload PDF] --> B["Validate<br/>size, pages, encryption, text"]
     B --> C["Index (once per file)<br/>extract pages, chunk, embed, store in Chroma"]
-    Q[Question] --> D[Retrieve top-k chunks]
+    Q[Question] --> D["Retrieve top-k chunks<br/>vector + BM25, fused"]
     C --> D
     D --> E["Prompt<br/>rules + page-labelled excerpts + question"]
     E --> F{Backend}
@@ -160,9 +161,10 @@ pdf_chatbot/
 - Each question is answered independently; there is no conversation memory.
 - Only PDFs with selectable text are supported (no OCR); tables and multi-column layouts are
   extracted as plain text and can come out in a confusing order.
-- Plain similarity search: no re-ranking or hybrid keyword search. Answer quality depends on
-  the chosen model, and small local models hallucinate more than hosted ones. There is no
-  automated answer-quality evaluation in this repository yet.
+- Retrieval is vector search merged with BM25 keyword search (no re-ranking). Answer quality
+  depends on the chosen model, and small local models hallucinate more than hosted ones. The
+  repository only evaluates retrieval (see Development), not the quality of generated answers,
+  and that evaluation is small (21 questions on the two demo PDFs).
 - Index builds are serialised in one process, and a PDF's index is kept until you delete the
   Chroma directory. The app is designed for a single server process and a small number of users.
 - Gradio is pinned to the 5.x line; the UI uses APIs that Gradio 6 removed.
@@ -181,6 +183,13 @@ pytest --cov
   cancellation code with a tiny random-weights model (no downloads). It runs automatically when
   `torch` and `transformers` are installed (`pip install -r requirements-local.txt`) and skips
   otherwise.
+- `python -m evals.retrieval_eval` compares vector, BM25 and hybrid retrieval on 21 labelled
+  questions about the demo PDFs (needs `requirements-local.txt`; the first run downloads the
+  embedding model). Gold pages are found by locating an evidence phrase in the PDF text. On
+  the current set, hybrid beats vector-only at `k=3` and `k=5`, e.g. at `k=3` the hit rate is
+  86% against 62% overall. BM25 alone scores as well or better here because the questions
+  reuse the document's wording, so treat the result as a regression check, not a benchmark.
+  It is not run in CI because it downloads a model.
 - CI (GitHub Actions) runs lint, the tests on several Python versions, and builds and
   smoke-tests the Docker image.
 
@@ -193,4 +202,6 @@ pytest --cov
   `PDFCHAT_HOST=0.0.0.0` for network access.
 - The OpenAI key box is no longer pre-filled from `OPENAI_API_KEY`; the server key is used as a
   silent fallback instead (see `PDFCHAT_USE_SERVER_KEY`).
+- Retrieval is now hybrid (vector + BM25) by default. Set `PDFCHAT_RETRIEVAL_MODE=vector` for
+  the previous embeddings-only behaviour; existing indexes keep working.
 - Indexes are named differently, so an existing `.chromadb/` is not reused. It is safe to delete.

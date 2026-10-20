@@ -24,6 +24,10 @@ BACKEND_OPENAI = "OpenAI"
 BACKEND_LOCAL = "Local Model (MiniCPM5-1B)"
 BACKENDS = (BACKEND_OPENAI, BACKEND_LOCAL)
 
+RETRIEVAL_VECTOR = "vector"
+RETRIEVAL_HYBRID = "hybrid"
+RETRIEVAL_MODES = (RETRIEVAL_VECTOR, RETRIEVAL_HYBRID)
+
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
 
@@ -96,6 +100,7 @@ class Settings:
     chunk_size: int = 1000
     chunk_overlap: int = 200
     retriever_k: int = 3
+    retrieval_mode: str = RETRIEVAL_HYBRID
 
     # Limits
     max_pdf_mb: int = 25
@@ -134,6 +139,10 @@ class Settings:
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
                 raise ConfigError(f"{name} must be a positive, finite number of seconds.")
+        if self.retrieval_mode not in RETRIEVAL_MODES:
+            raise ConfigError(
+                f"{ENV_PREFIX}RETRIEVAL_MODE must be one of: {', '.join(RETRIEVAL_MODES)}."
+            )
         if self.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ConfigError(f"{ENV_PREFIX}LOG_LEVEL is not a valid logging level.")
 
@@ -158,6 +167,7 @@ class Settings:
             chunk_size=_int("CHUNK_SIZE", cls.chunk_size, 100, 20000),
             chunk_overlap=_int("CHUNK_OVERLAP", cls.chunk_overlap, 0, 10000),
             retriever_k=_int("RETRIEVER_K", cls.retriever_k, 1, 20),
+            retrieval_mode=_str("RETRIEVAL_MODE", cls.retrieval_mode).lower(),
             max_pdf_mb=_int("MAX_PDF_MB", cls.max_pdf_mb, 1, 1024),
             max_pdf_pages=_int("MAX_PDF_PAGES", cls.max_pdf_pages, 1, 10000),
             max_question_chars=_int("MAX_QUESTION_CHARS", cls.max_question_chars, 10, 100000),
