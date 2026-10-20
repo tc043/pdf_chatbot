@@ -26,15 +26,11 @@ Decision rule (written before the test split was scored):
      page hit@3 has a 95% interval entirely below zero. In that case the default goes back to
      vector. BM25 alone is never the default, whatever its score, because it cannot match
      paraphrases without shared words; it is reported for reference.
-  3. The default chunk size (1000) changes only if another size, compared at an equal context
-     budget (k x chunk size = 3000 characters), beats it in page hit with an interval for the
-     difference that excludes zero.
-
-Usage (needs requirements-local.txt; downloads papers from arXiv, about 3 s apart)::
-
-    python -m evals.qasper_benchmark fetch --split validation --limit 40
-    python -m evals.qasper_benchmark inspect --split validation --limit 40
-    python -m evals.qasper_benchmark run --split validation --limit 40 --out results.json
+  3. The default chunk size (1000, k=3) changes only if another size, compared at an equal context
+     budget (k x chunk size = 3000 characters), beats it in hybrid page hit with a paired 95%
+     interval that excludes zero on validation AND on test, and its chunk@k is not lower on test.
+     Validation alone only nominates a candidate: it has about 100 questions and several
+     comparisons, and page hit is easier to reach with more, smaller chunks.
 """
 
 from __future__ import annotations
