@@ -453,6 +453,32 @@ def run_size(chunk_size: int, questions: Sequence[Question], version: str) -> li
     return records
 
 
+def budget_differences(by_size: dict[int, list[dict[str, Any]]]) -> dict[str, Any]:
+    """Paired page-hit difference of each chunk size vs 1000 at an equal context budget."""
+    base = by_size.get(1000)
+    if not base:
+        return {}
+    out: dict[str, Any] = {}
+    for size, records in by_size.items():
+        if size == 1000:
+            continue
+        k, base_k = CONTEXT_BUDGET // size, CONTEXT_BUDGET // 1000
+        for method in METHODS:
+            per_paper: dict[str, list[float]] = {}
+            for rec, ref in zip(records, base, strict=True):
+                diff = rec["scores"][method][f"page@{k}"] - ref["scores"][method][f"page@{base_k}"]
+                entry = per_paper.setdefault(rec["paper"], [0.0, 0])
+                entry[0] += diff
+                entry[1] += 1
+            mean, low, high = bootstrap_ci({p: (s, n) for p, (s, n) in per_paper.items()})
+            out[f"{size}_k{k}_minus_1000_k{base_k}_{method}"] = {
+                "mean": mean,
+                "low": low,
+                "high": high,
+            }
+    return out
+
+
 def git_sha() -> str:
     try:
         return subprocess.run(
@@ -481,10 +507,12 @@ def run(args: argparse.Namespace) -> int:
         "dropped": dropped.__dict__,
         "sizes": {},
     }
+    by_size = {}
     for size in args.chunk_sizes:
-        records = run_size(size, questions, args.version)
-        result["sizes"][str(size)] = summarize(records, METHODS, metrics)
+        by_size[size] = run_size(size, questions, args.version)
+        result["sizes"][str(size)] = summarize(by_size[size], METHODS, metrics)
         result["sizes"][str(size)]["chunk_size"] = size
+    result["budget_vs_default"] = budget_differences(by_size)
     Path(args.out).write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
     print(format_report(result))
     return 0
@@ -520,6 +548,8 @@ def format_report(result: dict[str, Any]) -> str:
                 f"  chunk {size:>5} k={k}  {method:<7}"
                 f" {c['mean']:.1%} [{c['low']:.1%}-{c['high']:.1%}]"
             )
+    for name, c in result.get("budget_vs_default", {}).items():
+        lines.append(f"  {name}: {c['mean']:+.1%} [{c['low']:+.1%}, {c['high']:+.1%}]")
     return "\n".join(lines)
 
 
