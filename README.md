@@ -77,6 +77,28 @@ OCR'd pages is limited (`PDFCHAT_OCR_MAX_PAGES`); a PDF above the limit is rejec
 message naming it. Switch OCR off with `PDFCHAT_OCR=off`. Turning OCR on rebuilds the index of
 documents that were indexed without it.
 
+#### Remote OCR server (optional, experimental)
+
+Instead of Tesseract, scanned pages can be read by a vision model that you run yourself behind
+an OpenAI-compatible API, for example
+[`baidu/Unlimited-OCR`](https://huggingface.co/baidu/Unlimited-OCR) on vLLM (it needs an
+NVIDIA GPU and its own `vllm/vllm-openai:unlimited-ocr` image; see the
+[vLLM recipe](https://recipes.vllm.ai/baidu/Unlimited-OCR)). It is much better than Tesseract
+at tables, formulas and reading order, according to its authors' benchmarks. Enable it with:
+
+```bash
+PDFCHAT_OCR_ENGINE=remote
+PDFCHAT_OCR_REMOTE_URL=http://gpu-box:8000/v1
+# PDFCHAT_OCR_REMOTE_MODEL=baidu/Unlimited-OCR   PDFCHAT_OCR_REMOTE_API_KEY=...
+```
+
+Each scanned page is sent as one PNG image, so **page images leave this machine** (the chat
+shows a note while indexing). Use only a server you trust; the URL can only be set through the
+environment, never in the browser. Indexes made with the remote engine are kept separate from
+Tesseract ones. The request format follows the vLLM recipe, but **this has not been tested
+against a live server** from this repository, and other servers may need a different prompt or
+extra parameters (see `app/ocr_remote.py`).
+
 ### Docker
 
 ```bash
@@ -112,6 +134,8 @@ Invalid values stop the app at startup with a message naming the variable.
 | `PDFCHAT_CHROMA_DIR` | `./.chromadb` | Where the vector index is stored |
 | `PDFCHAT_MAX_PDF_MB` / `PDFCHAT_MAX_PDF_PAGES` | `25` / `300` | Upload limits |
 | `PDFCHAT_OCR` / `PDFCHAT_OCR_LANGUAGE` / `PDFCHAT_OCR_MAX_PAGES` | `auto` / `eng` / `50` | OCR for scanned pages: `auto` (when Tesseract is installed) or `off`; Tesseract language codes such as `eng+deu`; maximum pages to OCR per PDF |
+| `PDFCHAT_OCR_ENGINE` / `PDFCHAT_OCR_REMOTE_URL` | `tesseract` / empty | OCR engine: `tesseract`, or `remote` to send scanned pages to your own OpenAI-compatible vision server at that URL (see [Remote OCR server](#remote-ocr-server-optional-experimental)) |
+| `PDFCHAT_OCR_REMOTE_MODEL` / `PDFCHAT_OCR_REMOTE_API_KEY` / `PDFCHAT_OCR_REMOTE_TIMEOUT_S` | `baidu/Unlimited-OCR` / empty / `120` | Model name, optional API key and per-page timeout for the remote engine |
 | `PDFCHAT_MAX_QUESTION_CHARS` | `2000` | Question length limit |
 | `PDFCHAT_OPENAI_TIMEOUT_S` / `PDFCHAT_OPENAI_MAX_RETRIES` | `60` / `2` | OpenAI request behaviour |
 | `PDFCHAT_LOCAL_TOKEN_TIMEOUT_S` | `120` | Abort a local generation that stalls this long; also how long a request waits for a busy local model before failing with a "busy" error |
@@ -191,6 +215,9 @@ after each question. Both are off by default, so nothing is deleted unless you a
   delete that directory, or see [Managing stored indexes](#managing-stored-indexes), to
   remove them. There is no per-user isolation, and by default nothing is deleted
   automatically.
+- **Remote OCR.** Off by default. With `PDFCHAT_OCR_ENGINE=remote`, an image of every scanned
+  page is sent to the server you configured, over whatever transport its URL uses (prefer
+  `https://`). The server's API key is never shown in logs or the UI.
 - **Telemetry.** Gradio and Chroma usage telemetry are disabled.
 - **Prompt injection.** Excerpts are placed in delimited blocks, tag look-alikes inside them are
   stripped, and the model is told to treat them as untrusted data. This reduces, but cannot

@@ -17,7 +17,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from PIL import Image
 
-from app import config, retrieval
+from app import config, ocr_remote, retrieval
 from app.exceptions import (
     IndexingError,
     ModelUnavailableError,
@@ -453,15 +453,34 @@ def _tessdata_dir() -> Path | None:
 
 
 def ocr_available(settings: config.Settings | None = None) -> bool:
-    """True when OCR is switched on and Tesseract has every requested language installed."""
+    """True when OCR is switched on and its engine can run.
+
+    Tesseract needs every requested language installed. The remote engine counts as available
+    once a server URL is configured (no network probe).
+    """
     settings = settings or config.get_settings()
     if settings.ocr != config.OCR_AUTO:
         return False
+    if settings.ocr_engine == config.OCR_ENGINE_REMOTE:
+        return bool(settings.ocr_remote_url)
     tessdata = _tessdata_dir()
     return tessdata is not None and all(
         (tessdata / f"{language}.traineddata").is_file()
         for language in settings.ocr_language.split("+")
     )
+
+
+def ocr_tag(settings: config.Settings) -> str:
+    """The OCR setup that is part of an index's name ("" when OCR is not active).
+
+    Tesseract indexes keep their original tag (the language), so existing indexes stay valid.
+    Text read by a remote model differs from Tesseract's, so it must never share an index.
+    """
+    if not ocr_available(settings):
+        return ""
+    if settings.ocr_engine == config.OCR_ENGINE_REMOTE:
+        return f"remote:{settings.ocr_remote_model}"
+    return settings.ocr_language
 
 
 def _page_has_images(page: pymupdf.Page) -> bool:
@@ -484,7 +503,12 @@ def _ocr_page(page: pymupdf.Page, language: str) -> str:
 def _no_text_message(settings: config.Settings, ocr_candidates: int, ocr_attempted: bool) -> str:
     base = "No selectable text was found in this PDF"
     if ocr_attempted:
-        return f"{base}, and OCR could not read any text from its scanned pages."
+        hint = (
+            " Check that the OCR server is reachable."
+            if settings.ocr_engine == config.OCR_ENGINE_REMOTE
+            else ""
+        )
+        return f"{base}, and OCR could not read any text from its scanned pages.{hint}"
     if settings.ocr == config.OCR_OFF:
         return f"{base}. If it is a scanned document, enable OCR (PDFCHAT_OCR=auto)."
     if ocr_candidates == 0:
@@ -523,7 +547,10 @@ def extract_documents(file_path: str, settings: config.Settings | None = None) -
             ocr_attempted = True
             logger.info("Running OCR on %d page(s)", len(scanned))
             for index in scanned:
-                text = _ocr_page(doc[index], settings.ocr_language)
+                if settings.ocr_engine == config.OCR_ENGINE_REMOTE:
+                    text = ocr_remote.recognize_page(doc[index], settings)
+                else:
+                    text = _ocr_page(doc[index], settings.ocr_language)
                 if text:
                     documents.append(_page_document(source, index, text, 0, ocr=True))
     if not documents:
@@ -583,7 +610,7 @@ def index_pdf(
         embedding_model,
         settings.chunk_size,
         settings.chunk_overlap,
-        ocr=settings.ocr_language if ocr_available(settings) else "",
+        ocr=ocr_tag(settings),
     )
     embeddings = get_embeddings_model(backend, openai_api_key, settings)
 
