@@ -26,11 +26,13 @@ Decision rule (written before the test split was scored):
      page hit@3 has a 95% interval entirely below zero. In that case the default goes back to
      vector. BM25 alone is never the default, whatever its score, because it cannot match
      paraphrases without shared words; it is reported for reference.
-  3. The default chunk size (1000, k=3) changes only if another size, compared at an equal context
-     budget (k x chunk size = 3000 characters), beats it in hybrid page hit with a paired 95%
-     interval that excludes zero on validation AND on test, and its chunk@k is not lower on test.
-     Validation alone only nominates a candidate: it has about 100 questions and several
-     comparisons, and page hit is easier to reach with more, smaller chunks.
+  3. The default chunk size (1000, k=3) is only ever *recommended* for change, never changed by
+     the benchmark itself: another size at an equal context budget (k x chunk size = 3000
+     characters) must beat it in hybrid page hit with a paired 95% interval that excludes zero
+     on BOTH validation and test. Validation alone only nominates a candidate (about 100
+     questions, several comparisons). Page hit and chunk hit both favour small chunks, so the
+     result is a recommendation with its costs stated: a new size re-indexes every stored PDF
+     and changes how much text each prompt contains.
 """
 
 from __future__ import annotations

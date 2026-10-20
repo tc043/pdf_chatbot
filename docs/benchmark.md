@@ -73,9 +73,11 @@ split was scored, and the test split is scored once:
 
 1. Hybrid stays the default retrieval mode unless its paired page hit@3 difference from vector
    has a 95% interval entirely below zero on test. BM25 alone is never the default.
-2. The default chunk size (1000, k=3) changes only if another size beats it at an equal context
-   budget with a paired interval excluding zero on **both** validation and test, and its chunk
-   hit@k is not lower on test.
+2. The default chunk size (1000, k=3) is never changed by the benchmark itself. Another size is
+   only *recommended* if, at an equal context budget, it beats the default in hybrid page hit
+   with a paired interval excluding zero on **both** validation and test. Small chunks make both
+   page hit and chunk hit easier, so the recommendation comes with its costs: a new size
+   re-indexes every stored PDF and changes how much text each prompt holds.
 
 ## Results
 
