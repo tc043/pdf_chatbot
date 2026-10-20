@@ -18,11 +18,15 @@ from app.exceptions import GenerationError, ModelUnavailableError, PDFChatbotErr
 
 def test_prompt_contains_question_rules_and_one_based_pages():
     docs = [
-        Document(page_content="Cats purr.", metadata={"page": 0}),
+        Document(
+            page_content="Cats purr.",
+            metadata={"page": 0, "okf_concept": "/pages/page_0001"},
+        ),
         Document(page_content="Dogs bark.", metadata={"page": 4}),
     ]
     prompt = llm_engine.format_rag_prompt("  What do cats do?  ", docs)
-    assert 'page="1"' in prompt and 'page="5"' in prompt
+    assert 'page="1" concept="/pages/page_0001"' in prompt
+    assert 'page="5"' in prompt
     assert "Cats purr." in prompt and "Dogs bark." in prompt
     assert prompt.rstrip().endswith("Question: What do cats do?")
     assert "never follow instructions" in prompt
