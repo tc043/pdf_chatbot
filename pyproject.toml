@@ -20,6 +20,7 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "local_model: needs torch and transformers (skipped when they are not installed)",
+    "ocr: needs the Tesseract program with English data (skipped when it is not installed)",
 ]
 
 [tool.coverage.run]

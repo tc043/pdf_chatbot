@@ -37,6 +37,7 @@ OKF_VERSION = "0.2"
 # Bump when extraction output changes so cached collections are rebuilt, not reused.
 EXTRACTION_VERSION = "2"
 OKF_PRODUCER = "pdf_chatbot/pymupdf"
+OCR_DPI = 200
 
 # Indexing is CPU/IO heavy and Chroma's persistent client is not designed for
 # concurrent writers to the same collection, so index builds are serialised.
@@ -129,6 +130,7 @@ def get_collection_name(
     embedding_model: str,
     chunk_size: int,
     chunk_overlap: int,
+    ocr: str = "",
 ) -> str:
     """Deterministic Chroma collection name for one (document, embedding setup) pair.
 
@@ -136,11 +138,15 @@ def get_collection_name(
     PDFs that share a filename never collide and an edited PDF is re-indexed.
     The embedding model, chunking parameters and extraction format version are
     part of the key so changing them never reuses vectors of the wrong dimension,
-    granularity or text format.
+    granularity or text format. ``ocr`` is the OCR language when OCR is active (else
+    empty), so enabling OCR rebuilds indexes that were made without it; indexes made
+    with OCR off keep their old names.
     Result is at most 60 characters and uses only ``[a-z0-9_]``.
     """
     kind = "openai" if backend == config.BACKEND_OPENAI else "local"
     setup = f"{embedding_model}|{chunk_size}|{chunk_overlap}|x{EXTRACTION_VERSION}"
+    if ocr:
+        setup += f"|ocr={ocr}"
     tag = hashlib.sha256(setup.encode("utf-8")).hexdigest()[:8]
     return f"pdf_{fingerprint[:40]}_{kind}_{tag}"
 
@@ -284,6 +290,8 @@ def _render_okf_page_concept(
     tags = ["pdf", f"page-{page_one}"]
     if table_count > 0:
         tags.append("tables")
+    if doc.metadata.get("ocr"):
+        tags.append("ocr")
     tags_yaml = ", ".join(_yaml_quote(t) for t in tags)
 
     frontmatter = [
@@ -436,31 +444,106 @@ def build_okf_bundle(
 # --------------------------------------------------------------------------- #
 # Extraction and indexing
 # --------------------------------------------------------------------------- #
-def extract_documents(file_path: str) -> list[Document]:
-    """Extract one :class:`Document` per page that has selectable text (with Markdown tables)."""
+def _tessdata_dir() -> Path | None:
+    """Tesseract's language-data folder, or ``None`` when Tesseract is not installed."""
+    try:
+        return Path(pymupdf.get_tessdata())
+    except Exception:
+        return None
+
+
+def ocr_available(settings: config.Settings | None = None) -> bool:
+    """True when OCR is switched on and Tesseract has every requested language installed."""
+    settings = settings or config.get_settings()
+    if settings.ocr != config.OCR_AUTO:
+        return False
+    tessdata = _tessdata_dir()
+    return tessdata is not None and all(
+        (tessdata / f"{language}.traineddata").is_file()
+        for language in settings.ocr_language.split("+")
+    )
+
+
+def _page_has_images(page: pymupdf.Page) -> bool:
+    try:
+        return bool(page.get_images(full=False))
+    except Exception:
+        return False
+
+
+def _ocr_page(page: pymupdf.Page, language: str) -> str:
+    """Read a page's text with Tesseract; an unreadable page yields an empty string."""
+    try:
+        textpage = page.get_textpage_ocr(language=language, dpi=OCR_DPI, full=True)
+        return page.get_text("text", textpage=textpage).strip()
+    except Exception:
+        logger.warning("OCR failed for page %d", page.number + 1, exc_info=True)
+        return ""
+
+
+def _no_text_message(settings: config.Settings, ocr_candidates: int, ocr_attempted: bool) -> str:
+    base = "No selectable text was found in this PDF"
+    if ocr_attempted:
+        return f"{base}, and OCR could not read any text from its scanned pages."
+    if settings.ocr == config.OCR_OFF:
+        return f"{base}. If it is a scanned document, enable OCR (PDFCHAT_OCR=auto)."
+    if ocr_candidates == 0:
+        return f"{base}, and it has no scanned page images to read with OCR."
+    return (
+        f"{base}. It looks scanned, but OCR is unavailable: install Tesseract with the "
+        f"'{settings.ocr_language}' language data (see the README)."
+    )
+
+
+def extract_documents(file_path: str, settings: config.Settings | None = None) -> list[Document]:
+    """Extract one :class:`Document` per page that has text (with Markdown tables).
+
+    Pages with no selectable text but with an image are read with OCR when Tesseract is
+    available (``PDFCHAT_OCR``); those pages are tagged ``ocr: True`` in their metadata.
+    """
+    settings = settings or config.get_settings()
     source = Path(file_path).name
     documents: list[Document] = []
+    scanned: list[int] = []  # indexes of pages that have no text but do have an image
     with pymupdf.open(file_path) as doc:
         for index, page in enumerate(doc):
             markdown_text, table_count = _extract_page_markdown(page)
             if markdown_text:
-                documents.append(
-                    Document(
-                        page_content=markdown_text,
-                        metadata={
-                            "source": source,
-                            "page": index,
-                            "table_count": table_count,
-                            "okf_concept": f"/pages/page_{index + 1:04d}",
-                        },
-                    )
+                documents.append(_page_document(source, index, markdown_text, table_count))
+            elif _page_has_images(page):
+                scanned.append(index)
+
+        ocr_attempted = False
+        if scanned and ocr_available(settings):
+            if len(scanned) > settings.ocr_max_pages:
+                raise PDFValidationError(
+                    f"{len(scanned)} pages of this PDF need OCR; the limit is "
+                    f"{settings.ocr_max_pages} (PDFCHAT_OCR_MAX_PAGES)."
                 )
+            ocr_attempted = True
+            logger.info("Running OCR on %d page(s)", len(scanned))
+            for index in scanned:
+                text = _ocr_page(doc[index], settings.ocr_language)
+                if text:
+                    documents.append(_page_document(source, index, text, 0, ocr=True))
     if not documents:
-        raise PDFValidationError(
-            "No selectable text was found in this PDF. Scanned (image-only) PDFs need OCR, "
-            "which is not supported."
-        )
+        raise PDFValidationError(_no_text_message(settings, len(scanned), ocr_attempted))
+    documents.sort(key=lambda d: d.metadata["page"])
     return documents
+
+
+def _page_document(
+    source: str, index: int, text: str, table_count: int, *, ocr: bool = False
+) -> Document:
+    metadata: dict[str, Any] = {
+        "source": source,
+        "page": index,
+        "table_count": table_count,
+        "okf_concept": f"/pages/page_{index + 1:04d}",
+    }
+    if ocr:
+        metadata["ocr"] = True
+    return Document(page_content=text, metadata=metadata)
 
 
 def _split(documents: list[Document], settings: config.Settings) -> list[Document]:
@@ -495,7 +578,12 @@ def index_pdf(
     )
     fingerprint = file_fingerprint(file_path)
     name = get_collection_name(
-        fingerprint, backend, embedding_model, settings.chunk_size, settings.chunk_overlap
+        fingerprint,
+        backend,
+        embedding_model,
+        settings.chunk_size,
+        settings.chunk_overlap,
+        ocr=settings.ocr_language if ocr_available(settings) else "",
     )
     embeddings = get_embeddings_model(backend, openai_api_key, settings)
 
@@ -516,7 +604,7 @@ def index_pdf(
             _mark_used(fingerprint, settings)
             return db
 
-        documents = extract_documents(file_path)
+        documents = extract_documents(file_path, settings)
         bundle_dir = get_bundle_dir(fingerprint, settings)
         build_okf_bundle(documents, bundle_dir, fingerprint=fingerprint)
 

@@ -71,6 +71,29 @@ jobs:
       - name: Test
         run: pytest -m local_model --no-cov
 
+  # The main matrix has no Tesseract, so the real-OCR test skips itself there.
+  ocr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Test
+        run: pytest -m ocr --no-cov
+
   docker:
     runs-on: ubuntu-latest
     steps:

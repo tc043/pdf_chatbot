@@ -26,6 +26,16 @@ def isolated_environment(monkeypatch):
     config.get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def hermetic_ocr(request, monkeypatch):
+    """Tests do not depend on whether Tesseract happens to be installed on this machine.
+
+    Tests marked ``ocr`` use the real program; others see it as missing unless they fake it.
+    """
+    if request.node.get_closest_marker("ocr") is None:
+        monkeypatch.setattr(pdf_engine, "_tessdata_dir", lambda: None)
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> config.Settings:
     return config.Settings(
@@ -53,6 +63,43 @@ def make_pdf(tmp_path: Path) -> Callable[..., str]:
             if text:
                 page.insert_textbox(pymupdf.Rect(50, 50, 550, 780), text, fontsize=11)
         doc.save(path, **save_kwargs)
+        doc.close()
+        return str(path)
+
+    return _make
+
+
+@pytest.fixture
+def make_scanned_pdf(tmp_path: Path) -> Callable[..., str]:
+    """Create a PDF whose pages are pictures of text (no text layer): one list of lines per page."""
+    import io
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    counter = {"n": 0}
+
+    def _font():
+        try:
+            return ImageFont.load_default(size=44)
+        except TypeError:  # Pillow < 10.1 has no scalable default font
+            return ImageFont.truetype("DejaVuSans.ttf", 44)
+
+    def _make(pages: list[list[str]], name: str | None = None) -> str:
+        counter["n"] += 1
+        folder = tmp_path / f"scans{counter['n']}"
+        folder.mkdir()
+        path = folder / (name or f"scan{counter['n']}.pdf")
+        doc = pymupdf.open()
+        for lines in pages:
+            image = Image.new("L", (1240, 700), 255)
+            draw = ImageDraw.Draw(image)
+            for row, line in enumerate(lines):
+                draw.text((60, 80 + row * 100), line, fill=0, font=_font())
+            buffer = io.BytesIO()
+            image.save(buffer, "PNG")
+            page = doc.new_page(width=620, height=350)
+            page.insert_image(page.rect, stream=buffer.getvalue())
+        doc.save(path, deflate=True, garbage=3)
         doc.close()
         return str(path)
 

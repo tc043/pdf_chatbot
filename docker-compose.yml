@@ -4,6 +4,7 @@ services:
       context: .
       args:
         WITH_LOCAL_MODEL: "false"   # "true" bundles PyTorch for the local MiniCPM backend (large)
+        WITH_OCR: "false"           # "true" installs Tesseract so scanned PDFs can be read (~100 MB)
     ports:
       # Bound to localhost on purpose. To expose it on the network, change this deliberately
       # and set PDFCHAT_AUTH_USER / PDFCHAT_AUTH_PASSWORD (or use an authenticating proxy).

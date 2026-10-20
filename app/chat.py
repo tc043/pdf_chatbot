@@ -200,7 +200,10 @@ def _run_turn(
 
     logger.info("Chat turn: backend=%s question_chars=%d", backend, len(question))
 
-    yield TurnUpdate("⏳ Indexing the PDF (first time only)...")
+    indexing = "⏳ Indexing the PDF (first time only)..."
+    if pdf_engine.ocr_available(settings):
+        indexing += " Scanned pages are read with OCR, which can take a while."
+    yield TurnUpdate(indexing)
     db = pdf_engine.index_pdf(pdf_path, backend, api_key, settings)
     _apply_retention(pdf_path, settings)
 
