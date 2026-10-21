@@ -101,16 +101,54 @@ def test_format_report_lists_every_arm_and_the_paired_differences():
     cell = {"mean": 0.5, "low": 0.4, "high": 0.6}
     arms = ["text-vector", "text-hybrid", "tesseract-vector", "tesseract-hybrid"]
     result = {
-        "engine": "tesseract",
-        "scan_dpi": 200,
+        "degrade": "moderate",
+        "scan_dpi": 150,
         "questions": 10,
         "papers": 4,
         "chunk_size": 500,
-        "ocr_fidelity_mean": 0.8,
+        "ocr_fidelity_mean": {"tesseract": 0.8},
+        "pages": {"tesseract": 40},
+        "pages_without_indexed_text": {"tesseract": 2},
         "scores": {arm: dict.fromkeys(qs.METRICS, cell) for arm in arms},
-        "ocr_minus_text": {m: dict.fromkeys(qs.METRICS, cell) for m in qs.METHODS},
+        "differences": {
+            "tesseract - text": {m: dict.fromkeys(qs.METRICS, cell) for m in qs.METHODS}
+        },
     }
     report = qs.format_report(result)
-    assert "80.0%" in report
+    assert "80.0%" in report and "2/40 pages without indexed text" in report
     assert all(arm in report for arm in arms)
     assert "tesseract - text, hybrid page@6" in report
+
+
+def test_degraded_scans_are_deterministic_and_have_no_text_layer(tmp_path):
+    original = text_pdf(tmp_path / "a.pdf", [SENTENCE, SENTENCE])
+    first = qs.rasterise(original, tmp_path / "one.pdf", degrade="severe", seed_key="paper")
+    second = qs.rasterise(original, tmp_path / "two.pdf", degrade="severe", seed_key="paper")
+    other = qs.rasterise(original, tmp_path / "three.pdf", degrade="severe", seed_key="other")
+
+    def images(path):
+        with pymupdf.open(path) as pdf:
+            assert all(not page.get_text().strip() for page in pdf)
+            return [pdf.extract_image(page.get_images()[0][0])["image"] for page in pdf]
+
+    assert images(first) == images(second)
+    assert images(first) != images(other)
+    assert not qs.has_text_layer(first)
+
+
+def test_severe_is_harsher_than_moderate_and_than_clean(tmp_path):
+    original = text_pdf(tmp_path / "a.pdf", [SENTENCE])
+    sizes = {}
+    for degrade in ("none", "moderate", "severe"):
+        scan = qs.rasterise(original, tmp_path / f"{degrade}.pdf", degrade=degrade, seed_key="p")
+        with pymupdf.open(scan) as pdf:
+            image = pdf.extract_image(pdf[0].get_images()[0][0])
+            sizes[degrade] = image["width"]
+    assert sizes["none"] > sizes["moderate"] > sizes["severe"]
+
+
+def test_degraded_runs_use_their_own_index_directory():
+    clean = qs.ocr_settings(config.OCR_ENGINE_REMOTE, "http://x/v1", "m")
+    bad = qs.ocr_settings(config.OCR_ENGINE_REMOTE, "http://x/v1", "m", degrade="severe")
+    assert clean.chroma_dir != bad.chroma_dir
+    assert clean.ocr_remote_timeout_s >= 300
