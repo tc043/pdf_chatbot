@@ -163,3 +163,16 @@ def test_engine_settings_come_from_the_environment(monkeypatch):
     loaded = config.Settings.from_env()
     assert (loaded.ocr_engine, loaded.ocr_remote_url) == ("remote", URL)
     assert (loaded.ocr_remote_api_key, loaded.ocr_remote_timeout_s) == ("k", 30.0)
+
+
+def test_output_seen_from_the_live_server_is_cleaned():
+    raw = (
+        "<|det|>aside_text [23, 268, 61, 702]<|/det|>arXiv:1706.03762v7 [cs.CL] 2 Aug 2023\n"
+        "<|det|>title [343, 185, 655, 208]<|/det|>Attention Is All You Need\n"
+        "<|det|>image [10, 10, 90, 90]<|/det|>\n"
+        "<|det|>text [189, 294, 355, 338]<|/det|>Ashish Vaswani*\nGoogle Brain"
+    )
+    assert ocr_remote.clean_output(raw) == (
+        "arXiv:1706.03762v7 [cs.CL] 2 Aug 2023\n\nAttention Is All You Need\n\n"
+        "Ashish Vaswani*\nGoogle Brain"
+    )
