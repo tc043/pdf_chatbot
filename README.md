@@ -77,6 +77,34 @@ OCR'd pages is limited (`PDFCHAT_OCR_MAX_PAGES`); a PDF above the limit is rejec
 message naming it. Switch OCR off with `PDFCHAT_OCR=off`. Turning OCR on rebuilds the index of
 documents that were indexed without it.
 
+#### Remote OCR server (optional, experimental)
+
+Instead of Tesseract, scanned pages can be read by a vision model that you run yourself behind
+an OpenAI-compatible API, for example
+[`baidu/Unlimited-OCR`](https://huggingface.co/baidu/Unlimited-OCR) on vLLM (it needs an
+NVIDIA GPU and its own `vllm/vllm-openai:unlimited-ocr` image; see the
+[vLLM recipe](https://recipes.vllm.ai/baidu/Unlimited-OCR)). It is much better than Tesseract
+at tables, formulas and reading order, according to its authors' benchmarks. In this
+repository's [scanned-pages experiment](docs/benchmark.md#scanned-pages-ocr) (rendered arXiv
+pages) page retrieval was within the noise of both the text layer and Tesseract, but on heavily
+degraded simulated scans it recovered the text far better (78.9% against 13.8% of 4-grams) and a
+1B local model's answers were +0.073 token-F1 better than from Tesseract (95% interval +0.044 to
++0.104), not distinguishable from the text layer. It read each page in about 7 seconds on an L4. These
+are simulated scans and one small model; they are not proof for your documents. Enable it with:
+
+```bash
+PDFCHAT_OCR_ENGINE=remote
+PDFCHAT_OCR_REMOTE_URL=http://gpu-box:8000/v1
+# PDFCHAT_OCR_REMOTE_MODEL=baidu/Unlimited-OCR   PDFCHAT_OCR_REMOTE_API_KEY=...
+```
+
+Each scanned page is sent as one PNG image, so **page images leave this machine** (the chat
+shows a note while indexing). Use only a server you trust; the URL can only be set through the
+environment, never in the browser. Indexes made with the remote engine are kept separate from
+Tesseract ones. The request format follows the vLLM recipe and was tested against
+`baidu/Unlimited-OCR` on vLLM; other servers may need a different prompt or extra parameters
+(see `app/ocr_remote.py`). `evals/modal_unlimited_ocr.py` is a Modal script that serves it.
+
 ### Docker
 
 ```bash
@@ -104,14 +132,16 @@ Invalid values stop the app at startup with a message naming the variable.
 | `PDFCHAT_OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model for the OpenAI backend |
 | `PDFCHAT_LOCAL_MODEL` | `openbmb/MiniCPM5-1B-SFT` | Hugging Face id of the local chat model |
 | `PDFCHAT_LOCAL_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model for the local backend |
-| `PDFCHAT_CHUNK_SIZE` / `PDFCHAT_CHUNK_OVERLAP` | `1000` / `200` | Chunking (characters) |
-| `PDFCHAT_RETRIEVER_K` | `3` | Chunks passed to the model |
+| `PDFCHAT_CHUNK_SIZE` / `PDFCHAT_CHUNK_OVERLAP` | `500` / `100` | Chunking (characters) |
+| `PDFCHAT_RETRIEVER_K` | `6` | Chunks passed to the model |
 | `PDFCHAT_INDEX_MAX_COUNT` / `PDFCHAT_INDEX_MAX_AGE_DAYS` | `0` / `0` | Optional retention: keep indexes for at most this many PDFs / delete indexes unused this long (`0` = keep everything). The PDF in use is never removed |
 | `PDFCHAT_HISTORY_TURNS` | `3` | Earlier question/answer pairs given to the model for follow-ups (`0` turns memory off) |
 | `PDFCHAT_RETRIEVAL_MODE` | `hybrid` | `hybrid` merges vector search with BM25 keyword search; `vector` uses embeddings only |
 | `PDFCHAT_CHROMA_DIR` | `./.chromadb` | Where the vector index is stored |
 | `PDFCHAT_MAX_PDF_MB` / `PDFCHAT_MAX_PDF_PAGES` | `25` / `300` | Upload limits |
 | `PDFCHAT_OCR` / `PDFCHAT_OCR_LANGUAGE` / `PDFCHAT_OCR_MAX_PAGES` | `auto` / `eng` / `50` | OCR for scanned pages: `auto` (when Tesseract is installed) or `off`; Tesseract language codes such as `eng+deu`; maximum pages to OCR per PDF |
+| `PDFCHAT_OCR_ENGINE` / `PDFCHAT_OCR_REMOTE_URL` | `tesseract` / empty | OCR engine: `tesseract`, or `remote` to send scanned pages to your own OpenAI-compatible vision server at that URL (see [Remote OCR server](#remote-ocr-server-optional-experimental)) |
+| `PDFCHAT_OCR_REMOTE_MODEL` / `PDFCHAT_OCR_REMOTE_API_KEY` / `PDFCHAT_OCR_REMOTE_TIMEOUT_S` | `baidu/Unlimited-OCR` / empty / `120` | Model name, optional API key and per-page timeout for the remote engine |
 | `PDFCHAT_MAX_QUESTION_CHARS` | `2000` | Question length limit |
 | `PDFCHAT_OPENAI_TIMEOUT_S` / `PDFCHAT_OPENAI_MAX_RETRIES` | `60` / `2` | OpenAI request behaviour |
 | `PDFCHAT_LOCAL_TOKEN_TIMEOUT_S` | `120` | Abort a local generation that stalls this long; also how long a request waits for a busy local model before failing with a "busy" error |
@@ -191,6 +221,9 @@ after each question. Both are off by default, so nothing is deleted unless you a
   delete that directory, or see [Managing stored indexes](#managing-stored-indexes), to
   remove them. There is no per-user isolation, and by default nothing is deleted
   automatically.
+- **Remote OCR.** Off by default. With `PDFCHAT_OCR_ENGINE=remote`, an image of every scanned
+  page is sent to the server you configured, over whatever transport its URL uses (prefer
+  `https://`). The server's API key is never shown in logs or the UI.
 - **Telemetry.** Gradio and Chroma usage telemetry are disabled.
 - **Prompt injection.** Excerpts are placed in delimited blocks, tag look-alikes inside them are
   stripped, and the model is told to treat them as untrusted data. This reduces, but cannot
@@ -207,7 +240,8 @@ after each question. Both are off by default, so nothing is deleted unless you a
 - Retrieval is vector search merged with BM25 keyword search (no re-ranking). Answer quality
   depends on the chosen model, and small local models hallucinate more than hosted ones. The
   repository only evaluates retrieval (see Development), not the quality of generated answers,
-  and that evaluation is small (21 questions on the two demo PDFs).
+  and the quick check is small (21 questions on the two demo PDFs); see
+  [docs/benchmark.md](docs/benchmark.md) for the larger benchmark on public papers.
 - Index builds are serialised in one process, and indexes are kept until you delete them
   (see [Managing stored indexes](#managing-stored-indexes)) or enable a retention limit. The app is designed for a single server process and a small number of users.
 - Gradio is pinned to the 5.x line; the UI uses APIs that Gradio 6 removed.
@@ -228,11 +262,22 @@ pytest --cov
   otherwise.
 - `python -m evals.retrieval_eval` compares vector, BM25 and hybrid retrieval on 21 labelled
   questions about the demo PDFs (needs `requirements-local.txt`; the first run downloads the
-  embedding model). Gold pages are found by locating an evidence phrase in the PDF text. On
-  the current set, hybrid beats vector-only at `k=3` and `k=5`, e.g. at `k=3` the hit rate is
-  86% against 62% overall. BM25 alone scores as well or better here because the questions
-  reuse the document's wording, so treat the result as a regression check, not a benchmark.
+  embedding model). Gold pages are found by locating an evidence phrase in the PDF text. With the default
+  settings (500-character chunks, `k=6`) the overall hit rate is 86% for vector, 86% for BM25
+  and 81% for hybrid, and at `k=3` it is 71%, 81% and 67%. That is 21 questions (one question is
+  about 5 points) and they reuse the document's wording, which favours keyword matching, so
+  treat it as a regression check, not a benchmark: it does not show hybrid ahead, unlike the
+  larger Qasper benchmark below.
   It is not run in CI because it downloads a model.
+- `python -m evals.qasper_benchmark` is the real retrieval benchmark: questions written by other
+  people about real arXiv papers (Qasper, CC BY 4.0), with confidence intervals and chunk-size
+  comparisons. See [docs/benchmark.md](docs/benchmark.md) for the method, how to run it and the
+  results. On the 1270 test questions hybrid retrieval is at least as good as vector-only
+  (page hit@3 73.6% against 72.2%, a difference within noise at the old chunk size), and
+  500-character chunks with `k=6` find the evidence page more often than 1000 with `k=3`
+  (86.6% against 73.6%) at the same amount of text, which is why they are now the default. With the local model, answers from the small-chunk setting scored no worse than the
+  default (Answer-F1 0.309 against 0.297, difference within noise). It downloads data, so it is
+  not run in CI.
 - CI (GitHub Actions) runs lint, the tests on several Python versions, the local-model tests,
   a real-Tesseract OCR test (`pytest -m ocr`), and builds and smoke-tests the Docker image
   (without the optional OCR and local-model extras).
@@ -252,6 +297,12 @@ pytest --cov
   retention limits exist (off by default).
 - Chat now remembers the last few turns (`PDFCHAT_HISTORY_TURNS`, `0` to disable) and
   uploading or removing a PDF clears the chat.
+- The defaults are now 500-character chunks (overlap 100) and `k=6` instead of 1000 / 200 / 3,
+  chosen on the Qasper benchmark (see [docs/benchmark.md](docs/benchmark.md)). Indexes made with
+  the old chunking are not reused: each stored PDF is re-indexed the first time it is opened,
+  and the old indexes stay on disk until you delete them (`python -m app.index_store prune` or
+  `clear`). Set `PDFCHAT_CHUNK_SIZE=1000 PDFCHAT_CHUNK_OVERLAP=200 PDFCHAT_RETRIEVER_K=3` to keep
+  the previous behaviour. Settings you already set explicitly are unaffected.
 - Retrieval is now hybrid (vector + BM25) by default. Set `PDFCHAT_RETRIEVAL_MODE=vector` for
   the previous embeddings-only behaviour; existing indexes keep working.
 - Indexes are named differently, so an existing `.chromadb/` is not reused. It is safe to delete.

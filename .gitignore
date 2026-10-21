@@ -56,3 +56,7 @@ Thumbs.db
 htmlcov/
 .pytest_cache/
 .ruff_cache/
+
+# Benchmark downloads (papers, datasets, indexes)
+.eval_cache/
+qasper_results*.json

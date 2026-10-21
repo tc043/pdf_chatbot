@@ -70,6 +70,18 @@ def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+OCR_REMOTE_NOTE = " They are sent to the configured OCR server."
+
+
+def indexing_message(settings: config.Settings) -> str:
+    message = "⏳ Indexing the PDF (first time only)..."
+    if pdf_engine.ocr_available(settings):
+        message += " Scanned pages are read with OCR, which can take a while."
+        if settings.ocr_engine == config.OCR_ENGINE_REMOTE:
+            message += OCR_REMOTE_NOTE
+    return message
+
+
 def history_pairs(messages: Sequence[Any] | None, turns: int) -> list[tuple[str, str]]:
     """Turn Gradio chat messages into the last ``turns`` (question, answer) pairs.
 
@@ -200,10 +212,7 @@ def _run_turn(
 
     logger.info("Chat turn: backend=%s question_chars=%d", backend, len(question))
 
-    indexing = "⏳ Indexing the PDF (first time only)..."
-    if pdf_engine.ocr_available(settings):
-        indexing += " Scanned pages are read with OCR, which can take a while."
-    yield TurnUpdate(indexing)
+    yield TurnUpdate(indexing_message(settings))
     db = pdf_engine.index_pdf(pdf_path, backend, api_key, settings)
     _apply_retention(pdf_path, settings)
 

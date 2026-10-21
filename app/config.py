@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 from app.exceptions import ConfigError
 
@@ -28,6 +29,9 @@ BACKENDS = (BACKEND_OPENAI, BACKEND_LOCAL)
 OCR_AUTO = "auto"
 OCR_OFF = "off"
 OCR_MODES = (OCR_AUTO, OCR_OFF)
+OCR_ENGINE_TESSERACT = "tesseract"
+OCR_ENGINE_REMOTE = "remote"
+OCR_ENGINES = (OCR_ENGINE_TESSERACT, OCR_ENGINE_REMOTE)
 
 RETRIEVAL_VECTOR = "vector"
 RETRIEVAL_HYBRID = "hybrid"
@@ -102,9 +106,9 @@ class Settings:
     local_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # RAG
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
-    retriever_k: int = 3
+    chunk_size: int = 500
+    chunk_overlap: int = 100
+    retriever_k: int = 6
     retrieval_mode: str = RETRIEVAL_HYBRID
     history_turns: int = 3  # earlier question/answer pairs given to the model; 0 = none
 
@@ -112,6 +116,12 @@ class Settings:
     ocr: str = OCR_AUTO  # "auto" = read pages that have no text when Tesseract is installed
     ocr_language: str = "eng"  # Tesseract language code(s), e.g. "eng" or "eng+deu"
     ocr_max_pages: int = 50
+    # Optional remote OCR (page images are sent to this server; off unless engine = "remote").
+    ocr_engine: str = OCR_ENGINE_TESSERACT
+    ocr_remote_url: str = ""
+    ocr_remote_model: str = "baidu/Unlimited-OCR"
+    ocr_remote_api_key: str = field(default="", repr=False)
+    ocr_remote_timeout_s: float = 120.0
 
     # Index retention (0 = keep everything, the default)
     index_max_count: int = 0  # keep at most this many PDFs' indexes
@@ -161,6 +171,17 @@ class Settings:
                 f"{ENV_PREFIX}OCR_LANGUAGE must be Tesseract language codes such as 'eng' "
                 "or 'eng+deu'."
             )
+        if self.ocr_engine not in OCR_ENGINES:
+            raise ConfigError(f"{ENV_PREFIX}OCR_ENGINE must be one of: {', '.join(OCR_ENGINES)}.")
+        if self.ocr_engine == OCR_ENGINE_REMOTE:
+            parsed = urlparse(self.ocr_remote_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                raise ConfigError(
+                    f"{ENV_PREFIX}OCR_REMOTE_URL must be an http(s) URL when "
+                    f"{ENV_PREFIX}OCR_ENGINE=remote."
+                )
+        if not math.isfinite(self.ocr_remote_timeout_s) or self.ocr_remote_timeout_s <= 0:
+            raise ConfigError("ocr_remote_timeout_s must be a positive, finite number of seconds.")
         if self.retrieval_mode not in RETRIEVAL_MODES:
             raise ConfigError(
                 f"{ENV_PREFIX}RETRIEVAL_MODE must be one of: {', '.join(RETRIEVAL_MODES)}."
@@ -194,6 +215,11 @@ class Settings:
             ocr=_str("OCR", cls.ocr).lower(),
             ocr_language=_str("OCR_LANGUAGE", cls.ocr_language),
             ocr_max_pages=_int("OCR_MAX_PAGES", cls.ocr_max_pages, 1, 10000),
+            ocr_engine=_str("OCR_ENGINE", cls.ocr_engine).lower(),
+            ocr_remote_url=_str("OCR_REMOTE_URL", cls.ocr_remote_url),
+            ocr_remote_model=_str("OCR_REMOTE_MODEL", cls.ocr_remote_model),
+            ocr_remote_api_key=os.environ.get(ENV_PREFIX + "OCR_REMOTE_API_KEY", "").strip(),
+            ocr_remote_timeout_s=_float("OCR_REMOTE_TIMEOUT_S", cls.ocr_remote_timeout_s, 1.0),
             index_max_count=_int("INDEX_MAX_COUNT", cls.index_max_count, 0, 100000),
             index_max_age_days=_int("INDEX_MAX_AGE_DAYS", cls.index_max_age_days, 0, 36500),
             max_pdf_mb=_int("MAX_PDF_MB", cls.max_pdf_mb, 1, 1024),

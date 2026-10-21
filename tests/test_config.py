@@ -12,7 +12,7 @@ def test_defaults_without_environment():
     assert s.host == "127.0.0.1"  # loopback by default, not 0.0.0.0
     assert s.is_loopback_host
     assert s.port == 7860
-    assert s.chunk_size == 1000 and s.chunk_overlap == 200
+    assert s.chunk_size == 500 and s.chunk_overlap == 100 and s.retriever_k == 6
     assert s.auth is None
     assert s.server_openai_api_key == ""
 

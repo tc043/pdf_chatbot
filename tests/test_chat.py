@@ -281,7 +281,8 @@ def test_follow_up_ranking_prefers_chunks_found_by_both_searches(settings, monke
     a, b, c, d = (Document(page_content=x, metadata={"page": i}) for i, x in enumerate("abcd"))
     results = {"cost?": [a, b, c], "alpha cost?": [d, b, a]}
     monkeypatch.setattr(pdf_engine, "retrieve_context", lambda db, q, k, mode=None: results[q])
-    fused = chat._retrieve("db", "cost?", [("alpha", "x")], settings)
+    three = config.Settings(**{**settings.__dict__, "retriever_k": 3})
+    fused = chat._retrieve("db", "cost?", [("alpha", "x")], three)
     # a and b were found by both searches, so they outrank d (previous-question search only);
     # c (current-question search only, ranked lower) is displaced.
     assert [doc.page_content for doc in fused] == ["a", "b", "d"]
