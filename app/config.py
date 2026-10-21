@@ -106,9 +106,9 @@ class Settings:
     local_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # RAG
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
-    retriever_k: int = 3
+    chunk_size: int = 500
+    chunk_overlap: int = 100
+    retriever_k: int = 6
     retrieval_mode: str = RETRIEVAL_HYBRID
     history_turns: int = 3  # earlier question/answer pairs given to the model; 0 = none
 

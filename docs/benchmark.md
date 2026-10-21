@@ -74,8 +74,8 @@ split was scored, and the test split is scored once:
 
 1. Hybrid stays the default retrieval mode unless its paired page hit@3 difference from vector
    has a 95% interval entirely below zero on test. BM25 alone is never the default.
-2. The default chunk size (1000, k=3) is never changed by the benchmark itself. Another size is
-   only *recommended* if, at an equal context budget, it beats the default in hybrid page hit
+2. The default chunk size (1000, k=3 at the time) was never changed by the benchmark itself.
+   Another size is only *recommended* if, at an equal context budget, it beats the default in hybrid page hit
    with a paired interval excluding zero on **both** validation and test. Small chunks make both
    page hit and chunk hit easier, so the recommendation comes with its costs: a new size
    re-indexes every stored PDF and changes how much text each prompt holds.
@@ -119,10 +119,9 @@ same amount of text.** The same holds for vector and BM25. As an exploratory che
 the rule), the strict chunk-level hit rate also favours 500/k=6 (55.8%) over 1000/k=3 (31.3%).
 
 What this does **not** show: that answers improve. More, smaller chunks make a page hit easier
-by covering more places, and each prompt then contains six excerpts instead of three. Changing
-the default would also re-index every stored PDF and change `PDFCHAT_RETRIEVER_K`. The default
-is therefore **not** changed here; 500 characters with k=6 is a recommendation to evaluate on
-answer quality first.
+by covering more places, and each prompt then contains six excerpts instead of three. That
+question is tested in the next section, and the default was then changed (see **Decision**
+there).
 
 ## Answer quality (local model)
 
@@ -157,6 +156,14 @@ Caveats: only the local 1B model was tested (no OpenAI key was available), and a
 may use better context differently; token F1 is a crude measure of free-form answers; and the
 oracle arm (annotators' evidence as context), which would separate retrieval from model error,
 was not run.
+
+**Decision.** The answer-quality rule was met, and the maintainer chose to adopt the candidate, so
+the app defaults changed from 1000-character chunks with overlap 200 and `k=3` to 500-character
+chunks with overlap 100 and `k=6` (the overlap stays at 20% of the chunk size, as benchmarked).
+This was decided with the local 1B model only; the OpenAI backend was not tested. The 21-question
+check in `evals/retrieval_eval.py` was re-run under the new defaults and no longer shows hybrid
+ahead (86% vector, 86% BM25, 81% hybrid at `k=6`; 21 questions, wording-sharing questions), so it
+is a regression check only. Hybrid stays the default on the strength of the 1270-question test.
 
 ## Limitations of this benchmark
 

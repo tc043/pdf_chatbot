@@ -126,8 +126,8 @@ Invalid values stop the app at startup with a message naming the variable.
 | `PDFCHAT_OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model for the OpenAI backend |
 | `PDFCHAT_LOCAL_MODEL` | `openbmb/MiniCPM5-1B-SFT` | Hugging Face id of the local chat model |
 | `PDFCHAT_LOCAL_EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model for the local backend |
-| `PDFCHAT_CHUNK_SIZE` / `PDFCHAT_CHUNK_OVERLAP` | `1000` / `200` | Chunking (characters) |
-| `PDFCHAT_RETRIEVER_K` | `3` | Chunks passed to the model |
+| `PDFCHAT_CHUNK_SIZE` / `PDFCHAT_CHUNK_OVERLAP` | `500` / `100` | Chunking (characters) |
+| `PDFCHAT_RETRIEVER_K` | `6` | Chunks passed to the model |
 | `PDFCHAT_INDEX_MAX_COUNT` / `PDFCHAT_INDEX_MAX_AGE_DAYS` | `0` / `0` | Optional retention: keep indexes for at most this many PDFs / delete indexes unused this long (`0` = keep everything). The PDF in use is never removed |
 | `PDFCHAT_HISTORY_TURNS` | `3` | Earlier question/answer pairs given to the model for follow-ups (`0` turns memory off) |
 | `PDFCHAT_RETRIEVAL_MODE` | `hybrid` | `hybrid` merges vector search with BM25 keyword search; `vector` uses embeddings only |
@@ -256,19 +256,20 @@ pytest --cov
   otherwise.
 - `python -m evals.retrieval_eval` compares vector, BM25 and hybrid retrieval on 21 labelled
   questions about the demo PDFs (needs `requirements-local.txt`; the first run downloads the
-  embedding model). Gold pages are found by locating an evidence phrase in the PDF text. On
-  the current set, hybrid beats vector-only at `k=3` and `k=5`, e.g. at `k=3` the hit rate is
-  86% against 62% overall. BM25 alone scores as well or better here because the questions
-  reuse the document's wording, so treat the result as a regression check, not a benchmark.
+  embedding model). Gold pages are found by locating an evidence phrase in the PDF text. With the default
+  settings (500-character chunks, `k=6`) the overall hit rate is 86% for vector, 86% for BM25
+  and 81% for hybrid, and at `k=3` it is 71%, 81% and 67%. That is 21 questions (one question is
+  about 5 points) and they reuse the document's wording, which favours keyword matching, so
+  treat it as a regression check, not a benchmark: it does not show hybrid ahead, unlike the
+  larger Qasper benchmark below.
   It is not run in CI because it downloads a model.
 - `python -m evals.qasper_benchmark` is the real retrieval benchmark: questions written by other
   people about real arXiv papers (Qasper, CC BY 4.0), with confidence intervals and chunk-size
   comparisons. See [docs/benchmark.md](docs/benchmark.md) for the method, how to run it and the
   results. On the 1270 test questions hybrid retrieval is at least as good as vector-only
-  (page hit@3 73.6% against 72.2%, a difference within noise at the default chunk size), and
+  (page hit@3 73.6% against 72.2%, a difference within noise at the old chunk size), and
   500-character chunks with `k=6` find the evidence page more often than 1000 with `k=3`
-  (86.6% against 73.6%) at the same amount of text; that is a recommendation, not yet the
-  default. With the local model, answers from the small-chunk setting scored no worse than the
+  (86.6% against 73.6%) at the same amount of text, which is why they are now the default. With the local model, answers from the small-chunk setting scored no worse than the
   default (Answer-F1 0.309 against 0.297, difference within noise). It downloads data, so it is
   not run in CI.
 - CI (GitHub Actions) runs lint, the tests on several Python versions, the local-model tests,
@@ -290,6 +291,12 @@ pytest --cov
   retention limits exist (off by default).
 - Chat now remembers the last few turns (`PDFCHAT_HISTORY_TURNS`, `0` to disable) and
   uploading or removing a PDF clears the chat.
+- The defaults are now 500-character chunks (overlap 100) and `k=6` instead of 1000 / 200 / 3,
+  chosen on the Qasper benchmark (see [docs/benchmark.md](docs/benchmark.md)). Indexes made with
+  the old chunking are not reused: each stored PDF is re-indexed the first time it is opened,
+  and the old indexes stay on disk until you delete them (`python -m app.index_store prune` or
+  `clear`). Set `PDFCHAT_CHUNK_SIZE=1000 PDFCHAT_CHUNK_OVERLAP=200 PDFCHAT_RETRIEVER_K=3` to keep
+  the previous behaviour. Settings you already set explicitly are unaffected.
 - Retrieval is now hybrid (vector + BM25) by default. Set `PDFCHAT_RETRIEVAL_MODE=vector` for
   the previous embeddings-only behaviour; existing indexes keep working.
 - Indexes are named differently, so an existing `.chromadb/` is not reused. It is safe to delete.
