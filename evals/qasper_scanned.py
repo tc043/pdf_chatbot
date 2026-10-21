@@ -26,8 +26,12 @@ randomness is seeded per paper and page, so every engine and every rerun sees th
 Levels, written down before any degraded result was produced (they are only changed after
 a pilot on the validation split, which is stated in docs/benchmark.md if it happens):
 
-  * moderate: 150 dpi, rotation 0.3-0.8 degrees, noise sigma 6, JPEG quality 60;
-  * severe  : 100 dpi, rotation 1.0-2.0 degrees, noise sigma 14, JPEG quality 35.
+  * moderate: 120 dpi, rotation 0.5-1.0 degrees, noise sigma 10, JPEG quality 45;
+  * severe  : 80 dpi, rotation 1.0-2.0 degrees, noise sigma 16, JPEG quality 30.
+
+A first pilot (5 validation papers, Tesseract fidelity only) showed that 150 dpi / 100 dpi
+levels barely moved Tesseract's fidelity at "moderate" (68% clean, 66%), so the levels above
+are the harsher ones used from the second pilot on; they are not changed again after it.
 
 Reading rule: a level shows a difference between two conditions only when the paired 95%
 interval (resampling papers) of their page-hit difference excludes zero; otherwise it is
@@ -79,8 +83,8 @@ class Level:
 
 
 LEVELS = {
-    "moderate": Level(dpi=150, rotation_deg=(0.3, 0.8), noise_sigma=6.0, jpeg_quality=60),
-    "severe": Level(dpi=100, rotation_deg=(1.0, 2.0), noise_sigma=14.0, jpeg_quality=35),
+    "moderate": Level(dpi=120, rotation_deg=(0.5, 1.0), noise_sigma=10.0, jpeg_quality=45),
+    "severe": Level(dpi=80, rotation_deg=(1.0, 2.0), noise_sigma=16.0, jpeg_quality=30),
 }
 DEGRADE_CHOICES = ["none", *LEVELS]
 
