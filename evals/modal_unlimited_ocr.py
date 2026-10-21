@@ -1,7 +1,7 @@
 """Serve baidu/Unlimited-OCR with vLLM on Modal, behind a bearer token.
 
 The server exposes an OpenAI-compatible ``/v1`` endpoint for ``app/ocr_remote.py``. It runs on one
-L40S (48 GB; the 3B BF16 model needs well under 8 GB, the rest is KV cache for page crops),
+L4 (24 GB; the 3B BF16 model needs about 8 GB, the rest is KV cache for page crops),
 scales to zero after a few idle minutes and caches the weights in a Modal Volume.
 
 One-time setup (the token never goes in the repository)::
@@ -22,7 +22,7 @@ import modal
 
 MODEL = "baidu/Unlimited-OCR"
 VLLM_PORT = 8000
-GPU = "L40S"
+GPU = "L4"
 SCALEDOWN_S = 180
 
 app = modal.App("unlimited-ocr")
