@@ -21,6 +21,10 @@ import subprocess
 import modal
 
 MODEL = "baidu/Unlimited-OCR"
+# The Hub commit of 2026-10-14 renamed model_type to "unlimited_ocr", which the release image's
+# native config (keyed "unlimited-ocr") no longer matches; the image then falls back to the repo's
+# remote code, which needs an older transformers than vLLM allows. This is the last good commit.
+REVISION = "07dea832e22aefee32ad281d4b80551282e1c168"
 VLLM_PORT = 8000
 GPU = "L4"
 SCALEDOWN_S = 180
@@ -53,6 +57,8 @@ def serve() -> None:
         "vllm",
         "serve",
         MODEL,
+        "--revision",
+        REVISION,
         "--host",
         "0.0.0.0",  # noqa: S104 - inside the Modal container; Modal fronts it with TLS
         "--port",
