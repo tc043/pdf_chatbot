@@ -84,7 +84,8 @@ an OpenAI-compatible API, for example
 [`baidu/Unlimited-OCR`](https://huggingface.co/baidu/Unlimited-OCR) on vLLM (it needs an
 NVIDIA GPU and its own `vllm/vllm-openai:unlimited-ocr` image; see the
 [vLLM recipe](https://recipes.vllm.ai/baidu/Unlimited-OCR)). It is much better than Tesseract
-at tables, formulas and reading order, according to its authors' benchmarks. Enable it with:
+at tables, formulas and reading order, according to its authors' benchmarks (not measured here;
+the [scanned-pages experiment](docs/benchmark.md#scanned-pages-ocr) covers Tesseract only). Enable it with:
 
 ```bash
 PDFCHAT_OCR_ENGINE=remote

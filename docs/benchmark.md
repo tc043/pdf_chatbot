@@ -165,11 +165,49 @@ check in `evals/retrieval_eval.py` was re-run under the new defaults and no long
 ahead (86% vector, 86% BM25, 81% hybrid at `k=6`; 21 questions, wording-sharing questions), so it
 is a regression check only. Hybrid stays the default on the strength of the 1270-question test.
 
+## Scanned pages (OCR)
+
+A separate, descriptive experiment (`evals/qasper_scanned.py`; no default depends on it). It asks
+how much retrieval is lost when a paper has to be read with OCR. Each paper is rasterised to an
+image-only PDF at 200 dpi (the run stops if a copy still has a text layer), indexed through the
+app's own Tesseract path, and scored on the **same questions and gold pages** as the original
+text PDF. Settings are the current defaults (500-character chunks, overlap 100, hybrid and vector
+retrieval, MiniLM embeddings). 96 papers drawn at random (seed 2) from the test split gave 320
+questions; intervals are 95%, resampling papers, and the differences are paired.
+
+| Page hit | Text layer | Tesseract | Tesseract - text layer |
+| --- | --- | --- | --- |
+| hybrid, top 3 | 74.7% | 72.8% | -1.9% [-6.8, +3.3] |
+| hybrid, top 6 | 87.5% | 86.6% | -0.9% [-4.6, +2.7] |
+| vector, top 3 | 73.4% | 72.5% | -0.9% [-6.3, +4.2] |
+| vector, top 6 | 87.8% | 84.1% | -3.8% [-8.1, +0.3] |
+
+On clean, born-digital arXiv pages rendered at 200 dpi, Tesseract costs between about 1 and 4
+points of page hit. Every interval includes zero, so this sample cannot separate a small loss
+from none. Hybrid lost less than vector at top 6 (-0.9% against -3.8%), but that comparison was
+not tested and should not be read as a finding.
+
+Two measures need care:
+
+- **Chunk hit is not comparable here.** It falls from 57% to 17% under OCR, because it matches
+  word 4-grams of the chunk against evidence taken from the text PDF, and OCR breaks those
+  sequences (line breaks, hyphenation, ligatures, column order). That is a measurement artefact,
+  not a retrieval result. Page hit is the figure to use.
+- **OCR fidelity** is 64.9%: the average share of each text page's 4-grams found in the indexed
+  OCR of that page. It counts exact word sequences, so it is a strict measure and a low one for
+  two-column papers.
+
+Not covered: real scans (skew, noise, low resolution, photographs), handwriting, other languages,
+and answer quality. The remote engine (`PDFCHAT_OCR_ENGINE=remote`) was not run because it needs a
+GPU server; `--ocr-engine remote --ocr-url ...` runs the same experiment against one. Results:
+`evals/results/qasper_scanned.json`.
+
 ## Limitations of this benchmark
 
 - Gold pages are found by text matching, so some evidence is missed or mislocated. The drop
   counts show how many questions that affects.
 - Questions are about NLP papers with a clear structure; scanned PDFs, other languages and
-  layout-heavy documents are not covered (OCR is switched off for this benchmark).
+  layout-heavy documents are not covered (OCR is switched off for the main benchmark; see
+  [Scanned pages](#scanned-pages-ocr) for a small OCR experiment on rendered, clean pages).
 - Page hit is easier to reach with more, smaller chunks, so read it together with chunk hit.
 - Retrieval only: a good retrieval score does not guarantee a good answer.
