@@ -26,6 +26,17 @@ Decision rule (written before any answers were generated):
   * The result holds for the local 1B model only. The OpenAI backend, which a different
     default would also affect, was not tested (no API key was available).
 
+Scanned papers (``--arms small tesseract remote --degrade severe``): the same questions are answered
+from the text layer (``small``, 500-character chunks, k=6) and from the image-only copy of each
+paper read by Tesseract and by the remote model (``tesseract``, ``remote``; same chunking, k and
+hybrid retrieval; the indexes come from ``qasper_scanned``, so run it first with the same
+``--degrade``, ``--ocr-url`` and papers). Written down before any answer was generated: the
+primary comparison is the paired difference in answer score ``remote - tesseract`` (95% interval,
+resampling papers), at the ``severe`` level only; the level where Tesseract's text is badly
+broken is where a difference is most likely. A difference counts only if its interval excludes
+zero. ``remote - small`` and ``tesseract - small`` are reported to show how far each engine is
+from the text layer. The generator is the local 1B model, which is weak and noisy.
+
 Usage (needs requirements-local.txt and the indexes from the retrieval benchmark)::
 
     python -m evals.qasper_answers generate --papers 40 --out evals/results/answers.jsonl
@@ -36,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
 import string
@@ -50,12 +62,16 @@ from langchain_core.documents import Document
 
 from app import config, llm_engine, pdf_engine, retrieval
 from evals import qasper_benchmark as qb
+from evals import qasper_scanned as qs
 
 MAX_NEW_TOKENS = 200
 ARMS = {
     "default": {"chunk_size": 1000, "k": 3},
     "small": {"chunk_size": 500, "k": 6},
     "oracle": {"chunk_size": 1000, "k": 3},  # context comes from the evidence, not retrieval
+    # The image-only copy of each paper, read by an OCR engine (see the module docstring).
+    "tesseract": {"chunk_size": 500, "k": 6, "ocr": "tesseract"},
+    "remote": {"chunk_size": 500, "k": 6, "ocr": "remote"},
 }
 _THINK = re.compile(r"<think>.*?(?:</think>|$)", re.DOTALL | re.IGNORECASE)
 _CITATION = re.compile(r"\(\s*pp?\.\s*\d+(?:\s*[,–-]\s*\d+)*\s*\)", re.IGNORECASE)
@@ -164,6 +180,27 @@ def generate_answer(docs: Sequence[Document], question: str, settings: config.Se
     )
 
 
+def _index(paper: str, spec: dict[str, Any], args: argparse.Namespace) -> Any:
+    """The paper's index for an arm: the text PDF, or its image-only copy read by an OCR engine."""
+    engine = spec.get("ocr")
+    if not engine:
+        return pdf_engine.index_pdf(
+            str(qb.pdf_path(paper, "")),
+            config.BACKEND_LOCAL,
+            None,
+            qb.eval_settings(spec["chunk_size"]),
+        )
+    scan_dir = "scanned" if args.degrade == "none" else f"scanned_{args.degrade}"
+    scan = qs.rasterise(
+        qb.pdf_path(paper, ""),
+        qb.CACHE_DIR / scan_dir / f"{paper}.pdf",
+        degrade=args.degrade,
+        seed_key=paper,
+    )
+    settings = qs.ocr_settings(engine, args.ocr_url, args.ocr_model, args.ocr_api_key, args.degrade)
+    return pdf_engine.index_pdf(str(scan), config.BACKEND_LOCAL, None, settings)
+
+
 def finished(path: Path) -> set[tuple[str, str]]:
     if not path.exists():
         return set()
@@ -204,14 +241,9 @@ def generate(args: argparse.Namespace) -> int:
                     if q.paper != current_paper:  # questions are grouped by paper
                         dbs.clear()
                         current_paper = q.paper
-                    key = (q.paper, spec["chunk_size"])
+                    key = (q.paper, spec["chunk_size"], spec.get("ocr", ""))
                     if key not in dbs:
-                        dbs[key] = pdf_engine.index_pdf(
-                            str(qb.pdf_path(q.paper, "")),
-                            config.BACKEND_LOCAL,
-                            None,
-                            qb.eval_settings(spec["chunk_size"]),
-                        )
+                        dbs[key] = _index(q.paper, spec, args)
                     docs = retrieval.search(dbs[key], q.text, spec["k"], config.RETRIEVAL_HYBRID)
                 answer = generate_answer(docs, q.text, local)
                 row = {
@@ -297,6 +329,15 @@ def report(records: list[dict[str, Any]]) -> str:
             continue
         d, lo, hi = paired(records, arm, "default")
         lines.append(f"{arm} - default, score: {d:+.3f} [{lo:+.3f}, {hi:+.3f}]")
+    ocr_arms = [a for a in arms if a in ("tesseract", "remote")]
+    if ocr_arms:
+        lines.append("")
+        pairs = [("remote", "tesseract")] if len(ocr_arms) == 2 else []
+        pairs += [(a, "small") for a in ocr_arms if "small" in arms]
+        for arm, base in pairs:
+            d, lo, hi = paired(records, arm, base)
+            note = "" if lo > 0 or hi < 0 else "  (includes zero)"
+            lines.append(f"{arm} - {base}, score: {d:+.3f} [{lo:+.3f}, {hi:+.3f}]{note}")
     lines.append("")
     kinds = sorted({r["arms"][arms[0]]["kind"] for r in records})
     for kind in kinds:
@@ -323,6 +364,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     gen.add_argument("--papers", type=int, default=40, help="random subset of test papers")
     gen.add_argument("--seed", type=int, default=1)
     gen.add_argument("--arms", nargs="+", choices=sorted(ARMS), default=["default", "small"])
+    gen.add_argument("--degrade", choices=qs.DEGRADE_CHOICES, default="none")
+    gen.add_argument("--ocr-url", default="", help="the server URL used for the remote indexes")
+    gen.add_argument("--ocr-model", default="baidu/Unlimited-OCR")
+    gen.add_argument(
+        "--ocr-api-key", default=os.environ.get(config.ENV_PREFIX + "OCR_REMOTE_API_KEY", "")
+    )
     gen.add_argument("--out", default="evals/results/answers.jsonl")
     sc = sub.add_parser("score")
     sc.add_argument("--answers", default="evals/results/answers.jsonl")

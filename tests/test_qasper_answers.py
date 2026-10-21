@@ -86,3 +86,50 @@ def test_verdict_follows_the_pre_set_rule():
     assert qa.verdict(worse).startswith("keep the default")
     longer = [rec(f"p{i}", 0.3, 0.3, words=(10, 20)) for i in range(10)]
     assert qa.verdict(longer).startswith("keep the default")
+
+
+def ocr_rec(paper, small, tesseract, remote):
+    def arm(score):
+        return {"kind": "extractive", "score": score, "recall": score, "words": 10, "seconds": 1.0}
+
+    arms = {"small": arm(small), "tesseract": arm(tesseract), "remote": arm(remote)}
+    return {"paper": paper, "arms": arms}
+
+
+def test_report_compares_the_ocr_engines_with_each_other_and_the_text_layer():
+    records = [ocr_rec(f"p{i}", 0.4, 0.1, 0.3) for i in range(10)]
+    report = qa.report(records)
+    assert "remote - tesseract, score: +0.200" in report
+    assert "tesseract - small, score: -0.300" in report
+    assert "remote - small, score: -0.100" in report
+    tied = qa.report([ocr_rec(f"p{i}", 0.3, 0.3, 0.3) for i in range(10)])
+    assert "remote - tesseract, score: +0.000 [+0.000, +0.000]  (includes zero)" in tied
+
+
+def test_ocr_arms_index_the_scanned_copy_with_their_engine(monkeypatch, tmp_path):
+    import argparse
+
+    from evals import qasper_scanned as qs
+
+    seen = {}
+
+    def fake_index(path, backend, key, settings):
+        seen["path"], seen["settings"] = path, settings
+        return "db"
+
+    monkeypatch.setattr(qa.pdf_engine, "index_pdf", fake_index)
+    monkeypatch.setattr(qa.qb, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(qa.qb, "pdf_path", lambda paper, version: tmp_path / "a.pdf")
+    monkeypatch.setattr(qs.qb, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(
+        qa.qs, "rasterise", lambda source, target, **kw: seen.update(target=target, kw=kw) or target
+    )
+    args = argparse.Namespace(
+        degrade="severe", ocr_url="http://x/v1", ocr_model="m", ocr_api_key="k"
+    )
+    assert qa._index("1901.1", qa.ARMS["remote"], args) == "db"
+    assert seen["target"].parent.name == "scanned_severe"
+    assert seen["kw"] == {"degrade": "severe", "seed_key": "1901.1"}
+    assert seen["settings"].ocr_engine == "remote"
+    assert seen["settings"].ocr_remote_url == "http://x/v1"
+    assert seen["settings"].chroma_dir.name == "severe"
