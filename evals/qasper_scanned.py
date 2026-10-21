@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -68,7 +69,7 @@ def has_text_layer(path: Path) -> bool:
     return True
 
 
-def ocr_settings(engine: str, url: str, model: str) -> config.Settings:
+def ocr_settings(engine: str, url: str, model: str, api_key: str = "") -> config.Settings:
     """The app's default chunking, with OCR on and a page limit no benchmark paper reaches."""
     defaults = config.Settings()
     return dataclasses.replace(
@@ -80,6 +81,7 @@ def ocr_settings(engine: str, url: str, model: str) -> config.Settings:
         ocr_engine=engine,
         ocr_remote_url=url,
         ocr_remote_model=model,
+        ocr_remote_api_key=api_key,
     )
 
 
@@ -127,7 +129,7 @@ def run(args: argparse.Namespace) -> int:
     questions, dropped = qb.prepare_questions("test", ids, "", papers)
     print(f"{len(questions)} questions from {len(ids)} papers", flush=True)
 
-    engine_settings = ocr_settings(args.ocr_engine, args.ocr_url, args.ocr_model)
+    engine_settings = ocr_settings(args.ocr_engine, args.ocr_url, args.ocr_model, args.ocr_api_key)
     text_settings = qb.eval_settings(engine_settings.chunk_size)
     by_paper: dict[str, list[qb.Question]] = {}
     for q in questions:
@@ -251,6 +253,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     cmd.add_argument("--ocr-url", default="")
     cmd.add_argument("--ocr-model", default="baidu/Unlimited-OCR")
+    cmd.add_argument(
+        "--ocr-api-key",
+        default=os.environ.get(config.ENV_PREFIX + "OCR_REMOTE_API_KEY", ""),
+        help="bearer token for the OCR server (default: $PDFCHAT_OCR_REMOTE_API_KEY)",
+    )
     cmd.add_argument("--out", default="evals/results/qasper_scanned.json")
     args = parser.parse_args(argv)
     return run(args)
