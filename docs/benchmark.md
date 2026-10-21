@@ -229,10 +229,12 @@ simulation, not real scans.
 
 Neither engine differs from the text layer (every interval includes zero), and the remote engine
 is ahead of Tesseract by 2 to 3 points in all four settings, but **no interval excludes zero**,
-so retrieval does not separate them. This test is too forgiving: a paper has many pages and
-chunks, so a question can still find its page through the words OCR did read. The visible
-difference is in the text itself. OCR fidelity (above) is **78.9% for Unlimited-OCR against 13.8%
-for Tesseract** on these scans; one remote page was indexed as empty after a timeout.
+so retrieval does not separate them. Retrieval looks too forgiving to show the gap: Tesseract's
+page hit on severe scans is about the same as on the clean ones (vector top 6: 86.9% against
+84.1%) although its OCR fidelity fell from 64.9% to 13.8%. A plausible reason, which I did not
+test, is that a paper has roughly nine pages, so the top six chunks cover much of it even when
+the text is poor. OCR fidelity is **78.9% for Unlimited-OCR against 13.8% for Tesseract** on
+these scans; one remote page was indexed as empty after a connection error to the server.
 Chunk hit is again not comparable.
 
 A *moderate* level (120 dpi, rotation 0.5-1 degrees, noise sigma 10, JPEG quality 45) gave the same
@@ -267,14 +269,15 @@ the run, was Unlimited-OCR minus Tesseract on severe scans.
 
 On heavily degraded scans, answers built from Tesseract's text are measurably worse than answers
 from the text layer, and answers built from Unlimited-OCR's text are not distinguishably
-different from the text layer. The gain over Tesseract is concentrated in extractive questions
-(0.156 to 0.256), where the answer must be copied from the text. The yes/no subset is small
+different from the text layer. The gain over Tesseract is largest on extractive questions
+(0.156 to 0.256); abstractive questions also gained (0.178 to 0.235), and I did not compute
+intervals per question type. The yes/no subset is small
 (55 questions) and both OCR engines are below the text layer there; its gap was not tested on
 its own.
 
 Caveats: one 1B model, one degradation level for answers, a simulated rather than real scan, a
-single seed, and a crude metric. The GPU server ran for roughly 9 hours in total (an estimate, not a billed figure); the
-Tesseract arm needs none. The OCR itself ran once per page; answers were generated afterwards from
+single seed, and a crude metric. The GPU server ran for roughly 9 hours in total (an estimate,
+not a billed figure); the Tesseract arm needs none. The OCR itself ran once per page; answers were generated afterwards from
 the cached indexes.
 
 Not covered: real scans (photographs, creases, bleed-through), handwriting, other languages, the

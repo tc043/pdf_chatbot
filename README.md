@@ -89,7 +89,7 @@ repository's [scanned-pages experiment](docs/benchmark.md#scanned-pages-ocr) (re
 pages) page retrieval was within the noise of both the text layer and Tesseract, but on heavily
 degraded simulated scans it recovered the text far better (78.9% against 13.8% of 4-grams) and a
 1B local model's answers were +0.073 token-F1 better than from Tesseract (95% interval +0.044 to
-+0.104), no different from the text layer. It read each page in about 7 seconds on an L4. These
++0.104), not distinguishable from the text layer. It read each page in about 7 seconds on an L4. These
 are simulated scans and one small model; they are not proof for your documents. Enable it with:
 
 ```bash
