@@ -124,6 +124,39 @@ the default would also re-index every stored PDF and change `PDFCHAT_RETRIEVER_K
 is therefore **not** changed here; 500 characters with k=6 is a recommendation to evaluate on
 answer quality first.
 
+## Answer quality (local model)
+
+`evals/qasper_answers.py` asks whether the retrieval gain carries over to answers. It generates
+answers with the app's own prompt and local model (MiniCPM5-1B, greedy decoding, thinking off,
+at most 200 new tokens) for the same questions under two settings, both hybrid:
+**default** (1000-character chunks, k=3) and **small** (500-character chunks, k=6). A seeded
+random sample of 150 test papers gave 457 questions from 144 papers. Scoring needs no judge
+model: yes/no questions use the answer's leading "yes"/"no", the others use Qasper's token-level
+Answer-F1 (maximum over annotators); page citations like "(p. 3)" and reasoning blocks are
+removed first. The decision rule was written before any answer was generated: *small* replaces
+*default* only if the paired difference's 95% lower bound is above -0.02 and its answers are not
+more than 25% longer.
+
+| | default | small | small - default (paired) |
+|---|---|---|---|
+| Answer score | 0.297 | 0.309 | **+0.012** [-0.013, +0.036] |
+| Gold-token recall | 0.391 | 0.408 | +0.017 [-0.015, +0.047] |
+| Mean answer length | 19.0 words | 21.3 words | x1.12 |
+| Seconds per answer (4 CPU cores) | 7.6 | 8.5 | |
+| extractive (253 questions) | 0.256 | 0.259 | +0.002 [-0.021, +0.026] |
+| abstractive (127) | 0.204 | 0.208 | +0.004 [-0.020, +0.027] |
+| yes/no accuracy (77) | 0.584 | 0.639 | +0.055 [-0.050, +0.167] |
+
+By the rule, small is **not meaningfully worse**, so switching is allowed. It is not shown to be
+better: every interval includes zero. The +13-point page-hit gain does not show up as a
+measurable answer gain with this 1B model. The cost of small chunks is about 12% more time per
+answer (more excerpts to read) and a re-index of every stored PDF.
+
+Caveats: only the local 1B model was tested (no OpenAI key was available), and a larger model
+may use better context differently; token F1 is a crude measure of free-form answers; and the
+oracle arm (annotators' evidence as context), which would separate retrieval from model error,
+was not run.
+
 ## Limitations of this benchmark
 
 - Gold pages are found by text matching, so some evidence is missed or mislocated. The drop

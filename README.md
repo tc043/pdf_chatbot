@@ -268,7 +268,9 @@ pytest --cov
   (page hit@3 73.6% against 72.2%, a difference within noise at the default chunk size), and
   500-character chunks with `k=6` find the evidence page more often than 1000 with `k=3`
   (86.6% against 73.6%) at the same amount of text; that is a recommendation, not yet the
-  default. It downloads data, so it is not run in CI.
+  default. With the local model, answers from the small-chunk setting scored no worse than the
+  default (Answer-F1 0.309 against 0.297, difference within noise). It downloads data, so it is
+  not run in CI.
 - CI (GitHub Actions) runs lint, the tests on several Python versions, the local-model tests,
   a real-Tesseract OCR test (`pytest -m ocr`), and builds and smoke-tests the Docker image
   (without the optional OCR and local-model extras).

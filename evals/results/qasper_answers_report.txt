@@ -1,0 +1,15 @@
+457 questions from 144 papers
+
+                 default       small
+score              0.297       0.309
+recall             0.391       0.408
+words             18.982      21.302
+sec/answer           7.6         8.5
+
+small - default, score: +0.012 [-0.013, +0.036]
+
+abstractive  n=127  default 0.204  small 0.208
+boolean      n=77   default 0.584  small 0.639
+extractive   n=253  default 0.256  small 0.259
+
+Verdict: small is not meaningfully worse (+0.012 [-0.013, +0.036]): switch
