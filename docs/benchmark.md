@@ -175,32 +175,46 @@ text PDF. Settings are the current defaults (500-character chunks, overlap 100, 
 retrieval, MiniLM embeddings). 96 papers drawn at random (seed 2) from the test split gave 320
 questions; intervals are 95%, resampling papers, and the differences are paired.
 
-| Page hit | Text layer | Tesseract | Tesseract - text layer |
-| --- | --- | --- | --- |
-| hybrid, top 3 | 74.7% | 72.8% | -1.9% [-6.8, +3.3] |
-| hybrid, top 6 | 87.5% | 86.6% | -0.9% [-4.6, +2.7] |
-| vector, top 3 | 73.4% | 72.5% | -0.9% [-6.3, +4.2] |
-| vector, top 6 | 87.8% | 84.1% | -3.8% [-8.1, +0.3] |
+| Page hit | Text layer | Tesseract | Tesseract - text layer | Unlimited-OCR (remote) | Remote - text layer |
+| --- | --- | --- | --- | --- | --- |
+| hybrid, top 3 | 74.7% | 72.8% | -1.9% [-6.8, +3.3] | 71.9% | -2.8% [-8.1, +2.2] |
+| hybrid, top 6 | 87.5% | 86.6% | -0.9% [-4.6, +2.7] | 88.8% | +1.2% [-2.8, +5.3] |
+| vector, top 3 | 73.4% | 72.5% | -0.9% [-6.3, +4.2] | 75.0% | +1.6% [-3.2, +6.5] |
+| vector, top 6 | 87.8% | 84.1% | -3.8% [-8.1, +0.3] | 87.8% | +0.0% [-3.7, +3.8] |
 
 On clean, born-digital arXiv pages rendered at 200 dpi, Tesseract costs between about 1 and 4
-points of page hit. Every interval includes zero, so this sample cannot separate a small loss
-from none. Hybrid lost less than vector at top 6 (-0.9% against -3.8%), but that comparison was
-not tested and should not be read as a finding.
+points of page hit, and Unlimited-OCR between about -3 and +2 points. Every interval, for both
+engines, includes zero, so this sample cannot separate a small loss from none. The two engines
+were run on the same papers and questions, but I did not compute a paired Tesseract-versus-remote
+interval, and the point estimates differ by less than the width of the intervals above; this
+experiment does not show that one engine retrieves better than the other. Hybrid lost less than
+vector for Tesseract at top 6 (-0.9% against -3.8%), but that comparison was not tested and should
+not be read as a finding.
 
-Two measures need care:
+The remote run used `baidu/Unlimited-OCR` (Hub revision `07dea83`) served by vLLM on one NVIDIA L4
+(`evals/modal_unlimited_ocr.py`), one request per page, with the app's prompt and parameters.
+Of the 889 pages, 4 (the first four pages of one paper) timed out at the 120 s client limit and
+were indexed as empty; they are counted in the scores above. Reading the 889 pages took about
+1 hour 45 minutes, roughly 7 seconds per page with four requests in flight.
+
+Three measures need care:
 
 - **Chunk hit is not comparable here.** It falls from 57% to 17% under OCR, because it matches
   word 4-grams of the chunk against evidence taken from the text PDF, and OCR breaks those
   sequences (line breaks, hyphenation, ligatures, column order). That is a measurement artefact,
   not a retrieval result. Page hit is the figure to use.
-- **OCR fidelity** is 64.9%: the average share of each text page's 4-grams found in the indexed
-  OCR of that page. It counts exact word sequences, so it is a strict measure and a low one for
-  two-column papers.
+- **OCR fidelity** is 64.9% for Tesseract and 83.1% for Unlimited-OCR: the average share of each
+  text page's 4-grams found in the indexed OCR of that page. It counts exact word sequences, so
+  it is a strict measure.
+- **Chunk hit under the remote engine** was 62.8% (vector) and 64.7% (hybrid) against 57.2% and
+  56.6% for the text layer (differences +5.6% and +8.1%, intervals excluding zero). I did not
+  investigate why it exceeds the text layer; it likely reflects how the text is segmented, not
+  better retrieval, so page hit is still the figure to use.
 
 Not covered: real scans (skew, noise, low resolution, photographs), handwriting, other languages,
-and answer quality. The remote engine (`PDFCHAT_OCR_ENGINE=remote`) was not run because it needs a
-GPU server; `--ocr-engine remote --ocr-url ...` runs the same experiment against one. Results:
-`evals/results/qasper_scanned.json`.
+and answer quality. GPU server. Results: `evals/results/qasper_scanned.json` (Tesseract) and
+`evals/results/qasper_scanned_remote.json` (remote; `--ocr-engine remote --ocr-url ...
+--ocr-api-key ...` reruns it).
 
 ## Limitations of this benchmark
 

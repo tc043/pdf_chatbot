@@ -84,8 +84,10 @@ an OpenAI-compatible API, for example
 [`baidu/Unlimited-OCR`](https://huggingface.co/baidu/Unlimited-OCR) on vLLM (it needs an
 NVIDIA GPU and its own `vllm/vllm-openai:unlimited-ocr` image; see the
 [vLLM recipe](https://recipes.vllm.ai/baidu/Unlimited-OCR)). It is much better than Tesseract
-at tables, formulas and reading order, according to its authors' benchmarks (not measured here;
-the [scanned-pages experiment](docs/benchmark.md#scanned-pages-ocr) covers Tesseract only). Enable it with:
+at tables, formulas and reading order, according to its authors' benchmarks. In this
+repository's [scanned-pages experiment](docs/benchmark.md#scanned-pages-ocr) (clean rendered
+arXiv pages) its retrieval was within the noise of both the text layer and Tesseract, and it
+read each page in about 7 seconds on an L4. Enable it with:
 
 ```bash
 PDFCHAT_OCR_ENGINE=remote
@@ -96,9 +98,9 @@ PDFCHAT_OCR_REMOTE_URL=http://gpu-box:8000/v1
 Each scanned page is sent as one PNG image, so **page images leave this machine** (the chat
 shows a note while indexing). Use only a server you trust; the URL can only be set through the
 environment, never in the browser. Indexes made with the remote engine are kept separate from
-Tesseract ones. The request format follows the vLLM recipe, but **this has not been tested
-against a live server** from this repository, and other servers may need a different prompt or
-extra parameters (see `app/ocr_remote.py`).
+Tesseract ones. The request format follows the vLLM recipe and was tested against
+`baidu/Unlimited-OCR` on vLLM; other servers may need a different prompt or extra parameters
+(see `app/ocr_remote.py`). `evals/modal_unlimited_ocr.py` is a Modal script that serves it.
 
 ### Docker
 

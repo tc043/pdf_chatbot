@@ -3,8 +3,7 @@
 Tesseract is the default OCR engine. This optional engine sends each scanned page, as one PNG
 image, to a server you run and configure (``PDFCHAT_OCR_ENGINE=remote``). The page image leaves
 this machine, so it is never enabled implicitly. The request mirrors the vLLM recipe for
-``baidu/Unlimited-OCR``; it has not been tested against a live server from this repository, and
-other servers may need a different prompt or extra parameters.
+``baidu/Unlimited-OCR`` and was run against it on vLLM (see docs/benchmark.md); other servers may need a different prompt or extra parameters.
 """
 
 from __future__ import annotations

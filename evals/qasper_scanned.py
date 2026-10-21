@@ -8,8 +8,8 @@ questions and the differences come from OCR quality alone:
   * ``text``      : the original PDF with its text layer;
   * ``tesseract`` : the image-only copy, read with Tesseract (the default OCR engine);
   * ``remote``    : the image-only copy, read through an OpenAI-compatible server
-                    (``--ocr-engine remote --ocr-url ...``; not run in this repository's CI
-                    and not tested against a live server here).
+                    (``--ocr-engine remote --ocr-url ... --ocr-api-key ...``; needs a GPU server,
+                    so it is not run in CI).
 
 Besides page hit and chunk hit (as in the retrieval benchmark) it reports **OCR fidelity**: the
 share of each text page's word 4-grams that the OCR text of the same page contains.
