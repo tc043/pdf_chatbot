@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pymupdf
@@ -21,6 +22,8 @@ from app import config
 logger = logging.getLogger(__name__)
 
 REMOTE_OCR_DPI = 200
+# Requests in flight per document; a vLLM server batches them.
+REMOTE_CONCURRENCY = 4
 # The model has no chat template: the text must start with a literal "<image>" tag.
 PROMPT = "<image>document parsing."
 MAX_TOKENS = 8192
@@ -67,11 +70,13 @@ def _client(settings: config.Settings) -> Any:
     )
 
 
-def recognize_page(page: pymupdf.Page, settings: config.Settings) -> str:
-    """Read one page through the remote server; failures yield an empty string."""
+def _png_data_uri(page: pymupdf.Page) -> str:
+    png = page.get_pixmap(dpi=REMOTE_OCR_DPI).tobytes("png")
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+
+def _recognize(image_url: str, page_number: int, settings: config.Settings) -> str:
     try:
-        png = page.get_pixmap(dpi=REMOTE_OCR_DPI).tobytes("png")
-        image_url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
         with _client(settings) as client:
             response = client.chat.completions.create(
                 model=settings.ocr_remote_model,
@@ -91,5 +96,38 @@ def recognize_page(page: pymupdf.Page, settings: config.Settings) -> str:
         return clean_output(response.choices[0].message.content or "")
     except Exception:
         # Never log the response or the image: both are the user's document.
-        logger.warning("Remote OCR failed for page %d", page.number + 1, exc_info=True)
+        logger.warning("Remote OCR failed for page %d", page_number, exc_info=True)
         return ""
+
+
+def recognize_page(page: pymupdf.Page, settings: config.Settings) -> str:
+    """Read one page through the remote server; failures yield an empty string."""
+    try:
+        image_url = _png_data_uri(page)
+    except Exception:
+        logger.warning("Could not render page %d for remote OCR", page.number + 1, exc_info=True)
+        return ""
+    return _recognize(image_url, page.number + 1, settings)
+
+
+def recognize_pages(pages: list[pymupdf.Page], settings: config.Settings) -> list[str]:
+    """Read several pages with a few requests in flight; results keep the page order.
+
+    Pages are rendered one after another (a PyMuPDF document is not thread-safe); only the
+    server round trips overlap.
+    """
+    uris: list[str | None] = []
+    for page in pages:
+        try:
+            uris.append(_png_data_uri(page))
+        except Exception:
+            logger.warning(
+                "Could not render page %d for remote OCR", page.number + 1, exc_info=True
+            )
+            uris.append(None)
+    with ThreadPoolExecutor(max_workers=REMOTE_CONCURRENCY) as pool:
+        futures = [
+            pool.submit(_recognize, uri, page.number + 1, settings) if uri else None
+            for page, uri in zip(pages, uris, strict=True)
+        ]
+    return [future.result() if future else "" for future in futures]

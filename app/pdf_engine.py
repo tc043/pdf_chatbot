@@ -546,11 +546,11 @@ def extract_documents(file_path: str, settings: config.Settings | None = None) -
                 )
             ocr_attempted = True
             logger.info("Running OCR on %d page(s)", len(scanned))
-            for index in scanned:
-                if settings.ocr_engine == config.OCR_ENGINE_REMOTE:
-                    text = ocr_remote.recognize_page(doc[index], settings)
-                else:
-                    text = _ocr_page(doc[index], settings.ocr_language)
+            if settings.ocr_engine == config.OCR_ENGINE_REMOTE:
+                texts = ocr_remote.recognize_pages([doc[index] for index in scanned], settings)
+            else:
+                texts = [_ocr_page(doc[index], settings.ocr_language) for index in scanned]
+            for index, text in zip(scanned, texts, strict=True):
                 if text:
                     documents.append(_page_document(source, index, text, 0, ocr=True))
     if not documents:

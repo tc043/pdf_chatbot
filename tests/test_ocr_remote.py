@@ -176,3 +176,19 @@ def test_output_seen_from_the_live_server_is_cleaned():
         "arXiv:1706.03762v7 [cs.CL] 2 Aug 2023\n\nAttention Is All You Need\n\n"
         "Ashish Vaswani*\nGoogle Brain"
     )
+
+
+def test_several_pages_are_read_in_order_and_a_failure_blanks_only_its_page(
+    monkeypatch, make_scanned_pdf, remote
+):
+    import pymupdf
+
+    def fake(image_url, page_number, settings):
+        if page_number == 2:
+            return ""
+        return f"text of page {page_number}"
+
+    monkeypatch.setattr(ocr_remote, "_recognize", fake)
+    with pymupdf.open(make_scanned_pdf([["a"], ["b"], ["c"]])) as doc:
+        texts = ocr_remote.recognize_pages(list(doc), remote)
+    assert texts == ["text of page 1", "", "text of page 3"]
