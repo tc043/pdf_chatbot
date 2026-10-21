@@ -85,9 +85,12 @@ an OpenAI-compatible API, for example
 NVIDIA GPU and its own `vllm/vllm-openai:unlimited-ocr` image; see the
 [vLLM recipe](https://recipes.vllm.ai/baidu/Unlimited-OCR)). It is much better than Tesseract
 at tables, formulas and reading order, according to its authors' benchmarks. In this
-repository's [scanned-pages experiment](docs/benchmark.md#scanned-pages-ocr) (clean rendered
-arXiv pages) its retrieval was within the noise of both the text layer and Tesseract, and it
-read each page in about 7 seconds on an L4. Enable it with:
+repository's [scanned-pages experiment](docs/benchmark.md#scanned-pages-ocr) (rendered arXiv
+pages) page retrieval was within the noise of both the text layer and Tesseract, but on heavily
+degraded simulated scans it recovered the text far better (78.9% against 13.8% of 4-grams) and a
+1B local model's answers were +0.073 token-F1 better than from Tesseract (95% interval +0.044 to
++0.104), no different from the text layer. It read each page in about 7 seconds on an L4. These
+are simulated scans and one small model; they are not proof for your documents. Enable it with:
 
 ```bash
 PDFCHAT_OCR_ENGINE=remote

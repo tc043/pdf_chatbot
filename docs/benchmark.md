@@ -211,10 +211,78 @@ Three measures need care:
   investigate why it exceeds the text layer; it likely reflects how the text is segmented, not
   better retrieval, so page hit is still the figure to use.
 
-Not covered: real scans (skew, noise, low resolution, photographs), handwriting, other languages,
-and answer quality. GPU server. Results: `evals/results/qasper_scanned.json` (Tesseract) and
-`evals/results/qasper_scanned_remote.json` (remote; `--ocr-engine remote --ocr-url ...
---ocr-api-key ...` reruns it).
+### Degraded scans
+
+Clean renders are the easy case, so the same 96 papers and 320 questions were also run on
+synthetically degraded copies (`--degrade`). The levels and the reading rule were fixed before the
+runs: a difference counts only if its paired 95% interval excludes zero. *Severe* is 80 dpi, a
+random page rotation of 1-2 degrees, Gaussian noise (sigma 16) and JPEG quality 30; the noise
+and rotation are seeded per paper and page, so both engines read identical images. This is a
+simulation, not real scans.
+
+| Page hit, severe scans | Text layer | Tesseract | Unlimited-OCR | Remote - Tesseract (paired) |
+| --- | --- | --- | --- | --- |
+| hybrid, top 3 | 74.7% | 71.9% | 74.7% | +2.8% [-3.3, +8.9] |
+| hybrid, top 6 | 87.5% | 86.9% | 90.0% | +3.1% [-0.6, +6.8] |
+| vector, top 3 | 73.4% | 72.8% | 76.2% | +3.4% [-1.7, +8.8] |
+| vector, top 6 | 87.8% | 86.9% | 89.1% | +2.2% [-1.5, +5.9] |
+
+Neither engine differs from the text layer (every interval includes zero), and the remote engine
+is ahead of Tesseract by 2 to 3 points in all four settings, but **no interval excludes zero**,
+so retrieval does not separate them. This test is too forgiving: a paper has many pages and
+chunks, so a question can still find its page through the words OCR did read. The visible
+difference is in the text itself. OCR fidelity (above) is **78.9% for Unlimited-OCR against 13.8%
+for Tesseract** on these scans; one remote page was indexed as empty after a timeout.
+Chunk hit is again not comparable.
+
+A *moderate* level (120 dpi, rotation 0.5-1 degrees, noise sigma 10, JPEG quality 45) gave the same
+picture with a smaller text gap: OCR fidelity 83.3% for Unlimited-OCR against 61.9% for Tesseract,
+and remote - Tesseract page hit between -1.2% and +3.8% across the same four settings, every
+interval including zero (vector top 6: +3.8% [+0.0, +7.3], which the harness counts as including
+zero). Results: `evals/results/qasper_scanned_moderate.json`.
+
+Because retrieval hides that gap, the answer-quality benchmark was run on the severe scans only.
+
+### Answer quality on severe scans
+
+`evals/qasper_answers.py generate --degrade severe` answers the same 320 questions with the same
+1B local model and the app's defaults, from three indexes of each paper: the text-layer PDF
+(*small*), the Tesseract read of the severe scan and the Unlimited-OCR read of it. Scoring is as
+above (token F1, yes/no accuracy, no judge model). The primary comparison, written down before
+the run, was Unlimited-OCR minus Tesseract on severe scans.
+
+| | Text layer | Tesseract | Unlimited-OCR |
+|---|---|---|---|
+| Answer score | 0.315 | 0.244 | 0.317 |
+| Gold-token recall | 0.417 | 0.311 | 0.444 |
+| extractive (185 questions) | 0.245 | 0.156 | 0.256 |
+| abstractive (80) | 0.207 | 0.178 | 0.235 |
+| yes/no accuracy (55) | 0.709 | 0.636 | 0.643 |
+
+| Paired difference (answer score) | |
+|---|---|
+| Unlimited-OCR - Tesseract | **+0.073** [+0.044, +0.104] |
+| Tesseract - text layer | -0.071 [-0.101, -0.045] |
+| Unlimited-OCR - text layer | +0.002 [-0.022, +0.025] (includes zero) |
+
+On heavily degraded scans, answers built from Tesseract's text are measurably worse than answers
+from the text layer, and answers built from Unlimited-OCR's text are not distinguishably
+different from the text layer. The gain over Tesseract is concentrated in extractive questions
+(0.156 to 0.256), where the answer must be copied from the text. The yes/no subset is small
+(55 questions) and both OCR engines are below the text layer there; its gap was not tested on
+its own.
+
+Caveats: one 1B model, one degradation level for answers, a simulated rather than real scan, a
+single seed, and a crude metric. The GPU server ran for roughly 9 hours in total (an estimate, not a billed figure); the
+Tesseract arm needs none. The OCR itself ran once per page; answers were generated afterwards from
+the cached indexes.
+
+Not covered: real scans (photographs, creases, bleed-through), handwriting, other languages, the
+OpenAI backend. Results: `evals/results/qasper_scanned.json` (Tesseract, clean),
+`qasper_scanned_remote.json` (remote, clean), `qasper_scanned_severe.json` (both engines, severe)
+and `answers_severe.jsonl` (the 960 generated answers). `--ocr-engine ... --ocr-url ...
+--ocr-api-key ...` reruns the retrieval runs, and `python -m evals.qasper_answers score --answers
+evals/results/answers_severe.jsonl` rescored the answers.
 
 ## Limitations of this benchmark
 
@@ -222,6 +290,6 @@ and answer quality. GPU server. Results: `evals/results/qasper_scanned.json` (Te
   counts show how many questions that affects.
 - Questions are about NLP papers with a clear structure; scanned PDFs, other languages and
   layout-heavy documents are not covered (OCR is switched off for the main benchmark; see
-  [Scanned pages](#scanned-pages-ocr) for a small OCR experiment on rendered, clean pages).
+  [Scanned pages](#scanned-pages-ocr) for a small OCR experiment on rendered pages and simulated degraded scans).
 - Page hit is easier to reach with more, smaller chunks, so read it together with chunk hit.
 - Retrieval only: a good retrieval score does not guarantee a good answer.
