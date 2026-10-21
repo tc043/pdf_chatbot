@@ -127,8 +127,9 @@ answer quality first.
 ## Answer quality (local model)
 
 `evals/qasper_answers.py` asks whether the retrieval gain carries over to answers. It generates
-answers with the app's own prompt and local model (MiniCPM5-1B, greedy decoding, thinking off,
-at most 200 new tokens) for the same questions under two settings, both hybrid:
+answers with the app's own prompt and local-model code (MiniCPM5-1B) but fixed generation
+settings (greedy decoding, thinking off, at most 200 new tokens) instead of the UI sliders,
+which the user sets and which default to a higher temperature and a longer limit for the same questions under two settings, both hybrid:
 **default** (1000-character chunks, k=3) and **small** (500-character chunks, k=6). A seeded
 random sample of 150 test papers gave 457 questions from 144 papers. Scoring needs no judge
 model: yes/no questions use the answer's leading "yes"/"no", the others use Qasper's token-level
