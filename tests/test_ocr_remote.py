@@ -192,3 +192,39 @@ def test_several_pages_are_read_in_order_and_a_failure_blanks_only_its_page(
     with pymupdf.open(make_scanned_pdf([["a"], ["b"], ["c"]])) as doc:
         texts = ocr_remote.recognize_pages(list(doc), remote)
     assert texts == ["text of page 1", "", "text of page 3"]
+
+
+def test_only_a_few_page_images_are_held_at_once(monkeypatch, make_scanned_pdf, remote):
+    import threading
+
+    import pymupdf
+
+    lock = threading.Lock()
+    held = peak = 0
+    real_render = ocr_remote._png_data_uri
+
+    def render(page):
+        nonlocal held, peak
+        with lock:
+            held += 1
+            peak = max(peak, held)
+        return real_render(page)
+
+    def recognize(image_url, page_number, settings):
+        nonlocal held
+        with lock:
+            held -= 1
+        return f"page {page_number}"
+
+    monkeypatch.setattr(ocr_remote, "_png_data_uri", render)
+    monkeypatch.setattr(ocr_remote, "_recognize", recognize)
+    with pymupdf.open(make_scanned_pdf([[str(i)] for i in range(12)])) as doc:
+        texts = ocr_remote.recognize_pages(list(doc), remote)
+    assert texts == [f"page {i}" for i in range(1, 13)]
+    assert peak <= ocr_remote.REMOTE_CONCURRENCY
+
+
+def test_another_server_gets_its_own_index(remote):
+    elsewhere = config.Settings(**{**remote.__dict__, "ocr_remote_url": "http://other:8000/v1"})
+    assert pdf_engine.ocr_tag(remote) != pdf_engine.ocr_tag(elsewhere)
+    assert "other" not in pdf_engine.ocr_tag(elsewhere)

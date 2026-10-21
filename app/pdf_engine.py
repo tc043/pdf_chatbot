@@ -474,12 +474,15 @@ def ocr_tag(settings: config.Settings) -> str:
     """The OCR setup that is part of an index's name ("" when OCR is not active).
 
     Tesseract indexes keep their original tag (the language), so existing indexes stay valid.
-    Text read by a remote model differs from Tesseract's, so it must never share an index.
+    Text read by a remote model differs from Tesseract's, so it must never share an index. The
+    server address is part of the tag (hashed, as a URL may carry credentials), because another
+    server can read the same model name differently.
     """
     if not ocr_available(settings):
         return ""
     if settings.ocr_engine == config.OCR_ENGINE_REMOTE:
-        return f"remote:{settings.ocr_remote_model}"
+        server = hashlib.sha256(settings.ocr_remote_url.encode()).hexdigest()[:8]
+        return f"remote:{settings.ocr_remote_model}@{server}"
     return settings.ocr_language
 
 

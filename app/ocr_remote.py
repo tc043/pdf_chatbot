@@ -12,7 +12,8 @@ from __future__ import annotations
 import base64
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 import pymupdf
@@ -113,21 +114,30 @@ def recognize_page(page: pymupdf.Page, settings: config.Settings) -> str:
 def recognize_pages(pages: list[pymupdf.Page], settings: config.Settings) -> list[str]:
     """Read several pages with a few requests in flight; results keep the page order.
 
-    Pages are rendered one after another (a PyMuPDF document is not thread-safe); only the
-    server round trips overlap.
+    Pages are rendered one after another (a PyMuPDF document is not thread-safe), and a page is
+    rendered only once a request slot is free, so at most ``REMOTE_CONCURRENCY`` images are held
+    at a time however long the document is.
     """
-    uris: list[str | None] = []
-    for page in pages:
+    slots = threading.BoundedSemaphore(REMOTE_CONCURRENCY)
+
+    def read(image_url: str, page_number: int) -> str:
         try:
-            uris.append(_png_data_uri(page))
-        except Exception:
-            logger.warning(
-                "Could not render page %d for remote OCR", page.number + 1, exc_info=True
-            )
-            uris.append(None)
+            return _recognize(image_url, page_number, settings)
+        finally:
+            slots.release()
+
     with ThreadPoolExecutor(max_workers=REMOTE_CONCURRENCY) as pool:
-        futures = [
-            pool.submit(_recognize, uri, page.number + 1, settings) if uri else None
-            for page, uri in zip(pages, uris, strict=True)
-        ]
+        futures: list[Future[str] | None] = []
+        for page in pages:
+            slots.acquire()
+            try:
+                image_url = _png_data_uri(page)
+            except Exception:
+                slots.release()
+                logger.warning(
+                    "Could not render page %d for remote OCR", page.number + 1, exc_info=True
+                )
+                futures.append(None)
+                continue
+            futures.append(pool.submit(read, image_url, page.number + 1))
     return [future.result() if future else "" for future in futures]
