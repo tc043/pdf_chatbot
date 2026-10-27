@@ -6,6 +6,6 @@
 torch>=2.14.1
 transformers>=5.20.1
 accelerate>=0.30
-sentence-transformers>=3.0
+sentence-transformers>=6.2.0
 huggingface-hub
 langchain-huggingface>=1.0,<2
