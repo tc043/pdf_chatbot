@@ -21,6 +21,7 @@ def isolated_environment(monkeypatch):
             monkeypatch.delenv(name)
     config.get_settings.cache_clear()
     pdf_engine._local_embeddings.cache_clear()
+    pdf_engine._ocr_cache.clear()
     monkeypatch.setattr(llm_engine.LocalModelManager, "_instance", None)
     yield
     config.get_settings.cache_clear()

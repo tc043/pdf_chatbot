@@ -15,11 +15,11 @@ DOCS = [
 @pytest.fixture
 def pipeline(monkeypatch):
     """Replace indexing, retrieval and generation with recorders so only chat.py runs."""
-    state = {"index_keys": [], "docs": list(DOCS), "pieces": ["Hello ", "world"]}
+    state = {"index_keys": [], "docs": list(DOCS), "pieces": ["Hello ", "world"], "unread": []}
 
-    def index_pdf(path, backend, key, settings):
+    def build_index(path, backend, key, settings):
         state["index_keys"].append(key)
-        return "db"
+        return pdf_engine.IndexResult("db", state["unread"], will_retry=state.get("retry", False))
 
     def retrieve(db, question, k, mode=None):
         state["k"] = k
@@ -30,7 +30,7 @@ def pipeline(monkeypatch):
         state["prompt"] = prompt
         yield from state["pieces"]
 
-    monkeypatch.setattr(pdf_engine, "index_pdf", index_pdf)
+    monkeypatch.setattr(pdf_engine, "build_index", build_index)
     monkeypatch.setattr(pdf_engine, "retrieve_context", retrieve)
     monkeypatch.setattr(llm_engine, "generate_openai_stream", openai_stream)
     return state
@@ -132,7 +132,7 @@ def test_known_errors_show_their_safe_message(pipeline, settings, monkeypatch):
     def failing_index(*args):
         raise IndexingError("Failed to index the PDF.")
 
-    monkeypatch.setattr(pdf_engine, "index_pdf", failing_index)
+    monkeypatch.setattr(pdf_engine, "build_index", failing_index)
     updates = run(settings)
     assert updates[-1].is_error and "Failed to index the PDF." in updates[-1].content
 
@@ -141,7 +141,7 @@ def test_unexpected_errors_hide_details_and_give_a_reference(pipeline, settings,
     def explode(*args):
         raise RuntimeError("password=hunter2 in /srv/app/secret.py")
 
-    monkeypatch.setattr(pdf_engine, "index_pdf", explode)
+    monkeypatch.setattr(pdf_engine, "build_index", explode)
     last = run(settings)[-1]
     assert last.is_error and "reference" in last.content
     assert "hunter2" not in last.content and "/srv/app" not in last.content
@@ -166,6 +166,34 @@ def test_empty_model_answer_is_an_error(pipeline, settings):
     pipeline["pieces"] = ["", "  "]
     last = run(settings)[-1]
     assert last.is_error and "empty answer" in last.content
+
+
+# --------------------------------------------------------- unread scanned pages
+
+
+def test_answer_ends_with_a_note_naming_pages_ocr_could_not_read(pipeline, settings):
+    pipeline["unread"], pipeline["retry"] = [3, 7, 9], True
+    updates = run(settings)
+    assert all(chat.UNREAD_NOTICE_PREFIX not in u.content for u in updates[:-1])
+    last = updates[-1]
+    assert last.content.startswith("Hello world\n\n") and not last.is_error
+    assert "pages 3, 7 and 9" in last.content and "use them. They will be tried" in last.content
+
+
+def test_note_says_when_unread_pages_are_no_longer_retried(pipeline, settings):
+    pipeline["unread"] = [4]
+    note = run(settings)[-1].content
+    assert "page 4 of this PDF, so this answer cannot use it." in note
+    assert "tried again" not in note
+
+
+def test_complete_index_adds_no_note(pipeline, settings):
+    assert run(settings)[-1].content == "Hello world"
+
+
+def test_unread_pages_note_is_not_remembered_as_part_of_the_answer():
+    answer = "The answer.\n\n" + chat.unread_pages_notice([2], will_retry=True)
+    assert chat.history_pairs(msgs(("q", answer)), 3) == [("q", "The answer.")]
 
 
 # ------------------------------------------------------------------ local model

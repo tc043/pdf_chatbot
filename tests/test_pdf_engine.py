@@ -7,7 +7,7 @@ import pytest
 from langchain_chroma import Chroma
 from langchain_core.embeddings import DeterministicFakeEmbedding
 
-from app import config, pdf_engine
+from app import config, index_store, pdf_engine
 from app.exceptions import (
     IndexingError,
     ModelUnavailableError,
@@ -260,12 +260,36 @@ def test_existing_index_is_reused(make_pdf, settings, fake_embeddings, monkeypat
     path = make_pdf(SAMPLE_PAGES)
     pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=settings)
 
-    def boom(_):
+    def boom(*args, **kwargs):
         raise AssertionError("PDF was re-extracted although an index already exists")
 
-    monkeypatch.setattr(pdf_engine, "extract_documents", boom)
+    monkeypatch.setattr(pdf_engine, "extract_pages", boom)
     db = pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=settings)
     assert db.get(limit=1)["ids"]
+
+
+def test_a_pdf_being_indexed_counts_as_recently_used(
+    make_pdf, settings, fake_embeddings, monkeypatch
+):
+    # Retention prunes by last use; a PDF whose build is in progress must look freshly used.
+    import os
+    import time
+
+    path = make_pdf(SAMPLE_PAGES)
+    pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=settings)
+    bundle = pdf_engine.get_bundle_dir(pdf_engine.file_fingerprint(path), settings)
+    os.utime(bundle, (0, 0))
+    seen = {}
+    real = pdf_engine.extract_pages
+
+    def spy(*args, **kwargs):
+        seen["mtime"] = bundle.stat().st_mtime
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pdf_engine, "extract_pages", spy)
+    other_chunking = config.Settings(**{**settings.__dict__, "chunk_size": 300})
+    pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=other_chunking)
+    assert seen["mtime"] > time.time() - 60
 
 
 def test_same_filename_different_content_gets_separate_indexes(make_pdf, settings, fake_embeddings):
@@ -281,6 +305,7 @@ def test_same_filename_different_content_gets_separate_indexes(make_pdf, setting
 def test_scanned_pdf_is_rejected_with_a_clear_message(make_pdf, settings, fake_embeddings):
     with pytest.raises(PDFValidationError, match="OCR"):
         pdf_engine.index_pdf(make_pdf(["", ""]), config.BACKEND_LOCAL, settings=settings)
+    assert index_store.list_indexes(settings) == []  # no empty collection is left behind
 
 
 def test_failed_indexing_leaves_no_partial_index(make_pdf, settings, fake_embeddings, monkeypatch):
@@ -311,6 +336,22 @@ def test_provider_errors_during_indexing_become_friendly(make_pdf, settings, mon
     )
     with pytest.raises(ModelUnavailableError, match="key was rejected"):
         pdf_engine.index_pdf(make_pdf(SAMPLE_PAGES), config.BACKEND_OPENAI, "sk-x", settings)
+    assert index_store.list_indexes(settings) == []  # no empty collection is left behind
+
+
+def test_index_deleted_during_a_build_still_returns_a_working_handle(
+    make_pdf, settings, fake_embeddings, monkeypatch
+):
+    path = make_pdf(SAMPLE_PAGES)
+    real = pdf_engine.extract_pages
+
+    def delete_meanwhile(*args, **kwargs):
+        index_store.clear(settings)  # e.g. an operator, or retention, while OCR runs
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pdf_engine, "extract_pages", delete_meanwhile)
+    db = pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=settings)
+    assert db.get(limit=1)["ids"]
 
 
 def test_index_rejects_invalid_pdf_before_touching_models(tmp_path, settings, monkeypatch):

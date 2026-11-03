@@ -101,6 +101,7 @@ def _delete(settings: config.Settings, infos: Sequence[IndexInfo]) -> int:
         client = _client(settings)
         for info in infos:
             client.delete_collection(info.collection)
+            pdf_engine.incomplete_marker(info.collection, settings).unlink(missing_ok=True)
         deleted = {info.collection for info in infos}
         remaining = set()
         for entry in client.list_collections():
@@ -108,8 +109,10 @@ def _delete(settings: config.Settings, infos: Sequence[IndexInfo]) -> int:
             match = _NAME_RE.match(name)
             if match and name not in deleted:
                 remaining.add(match["fingerprint"])
-        for fingerprint in {i.fingerprint for i in infos if i.fingerprint} - remaining:
-            shutil.rmtree(pdf_engine.get_bundle_dir(fingerprint, settings), ignore_errors=True)
+        for fingerprint in {i.fingerprint for i in infos if i.fingerprint}:
+            pdf_engine.forget_ocr_text(fingerprint)
+            if fingerprint not in remaining:
+                shutil.rmtree(pdf_engine.get_bundle_dir(fingerprint, settings), ignore_errors=True)
     logger.info("Deleted %d stored index(es)", len(infos))
     return len(infos)
 

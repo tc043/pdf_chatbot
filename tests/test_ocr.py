@@ -123,8 +123,20 @@ def test_ocr_failure_on_one_page_does_not_lose_the_others(
         return "" if page.number == 0 else "second page text"
 
     monkeypatch.setattr(pdf_engine, "_ocr_page", flaky)
-    docs = pdf_engine.extract_documents(make_scanned_pdf([SCAN_LINES, SCAN_LINES]), settings)
-    assert [d.metadata["page"] for d in docs] == [1]
+    extraction = pdf_engine.extract_pages(make_scanned_pdf([SCAN_LINES, SCAN_LINES]), settings)
+    assert [d.metadata["page"] for d in extraction.documents] == [1]
+    assert extraction.unread_pages == []  # OCR worked; that page just has no text
+
+
+def test_a_page_ocr_failed_on_is_reported_not_silently_dropped(
+    fake_tesseract, make_scanned_pdf, settings, monkeypatch
+):
+    monkeypatch.setattr(
+        pdf_engine, "_ocr_page", lambda page, language: None if page.number == 0 else "text"
+    )
+    extraction = pdf_engine.extract_pages(make_scanned_pdf([SCAN_LINES, SCAN_LINES]), settings)
+    assert [d.metadata["page"] for d in extraction.documents] == [1]
+    assert extraction.unread_pages == [1]  # 1-based, as shown to users
 
 
 def test_ocr_page_swallows_tesseract_errors():
@@ -134,7 +146,7 @@ def test_ocr_page_swallows_tesseract_errors():
         def get_textpage_ocr(self, **kwargs):
             raise RuntimeError("tesseract crashed")
 
-    assert pdf_engine._ocr_page(Page(), "eng") == ""
+    assert pdf_engine._ocr_page(Page(), "eng") is None
 
 
 # -------------------------------------------------------------------- indexing
@@ -184,11 +196,182 @@ def test_turning_ocr_on_rebuilds_instead_of_reusing_an_index_without_it(
     assert {m["page"] for m in after.get()["metadatas"]} == {0, 1}
 
 
+@pytest.fixture
+def flaky_ocr(fake_tesseract, monkeypatch):
+    """OCR that fails on the pages listed in ``failing`` (0-based) and records every call."""
+    state = {"failing": {0}, "calls": []}
+
+    def ocr(page, language):
+        state["calls"].append(page.number)
+        return None if page.number in state["failing"] else f"scanned page {page.number + 1}"
+
+    monkeypatch.setattr(pdf_engine, "_ocr_page", ocr)
+    return state
+
+
+def _pages(db):
+    return sorted({m["page"] for m in db.get()["metadatas"]})
+
+
+def _build(path, settings):
+    return pdf_engine.build_index(path, config.BACKEND_LOCAL, settings=settings)
+
+
+def test_unread_pages_are_retried_and_only_they_are_read_again(
+    flaky_ocr, make_scanned_pdf, settings, fake_embeddings
+):
+    path = make_scanned_pdf([SCAN_LINES, SCAN_LINES, SCAN_LINES])
+    first = _build(path, settings)
+    assert (first.unread_pages, first.will_retry, _pages(first.db)) == ([1], True, [1, 2])
+
+    flaky_ocr["failing"] = set()  # the OCR server is back
+    flaky_ocr["calls"].clear()
+    second = _build(path, settings)
+    assert flaky_ocr["calls"] == [0]  # pages read the first time are not sent again
+    assert (second.unread_pages, second.will_retry, _pages(second.db)) == ([], False, [0, 1, 2])
+
+    flaky_ocr["calls"].clear()
+    assert _build(path, settings).unread_pages == [] and flaky_ocr["calls"] == []  # complete
+    assert not pdf_engine._ocr_cache  # its OCR text is not kept once nothing needs a retry
+
+
+def test_retries_that_read_nothing_new_keep_the_index_and_stop_at_the_limit(
+    flaky_ocr, make_scanned_pdf, settings, fake_embeddings, monkeypatch
+):
+    path = make_scanned_pdf([SCAN_LINES, SCAN_LINES])
+    _build(path, settings)
+
+    def no_rewrite(*args, **kwargs):
+        raise AssertionError("an index that read no more pages must not be rebuilt")
+
+    monkeypatch.setattr(type(fake_embeddings), "embed_documents", no_rewrite)
+    results = [_build(path, settings) for _ in range(pdf_engine.MAX_INDEX_ATTEMPTS)]
+    assert [r.unread_pages for r in results] == [[1]] * pdf_engine.MAX_INDEX_ATTEMPTS
+    assert [r.will_retry for r in results] == [True, False, False]
+    assert all(_pages(r.db) == [1] for r in results)
+    # The first build and two retries tried page 1; after that the index is kept as it is.
+    assert flaky_ocr["calls"].count(0) == pdf_engine.MAX_INDEX_ATTEMPTS
+    assert not pdf_engine._ocr_cache
+
+
+def test_a_retry_while_ocr_is_down_keeps_the_incomplete_index(
+    flaky_ocr, make_scanned_pdf, settings, fake_embeddings
+):
+    path = make_scanned_pdf([SCAN_LINES, SCAN_LINES])
+    _build(path, settings)
+    pdf_engine._ocr_cache.clear()  # e.g. the app restarted
+    flaky_ocr["failing"] = {0, 1}  # now no page can be read at all
+    retry = _build(path, settings)
+    assert (retry.unread_pages, retry.will_retry, _pages(retry.db)) == ([1], True, [1])
+
+
+def test_deleting_an_incomplete_index_removes_its_retry_record(
+    flaky_ocr, make_scanned_pdf, settings, fake_embeddings
+):
+    from app import index_store
+
+    path = make_scanned_pdf([SCAN_LINES, SCAN_LINES])
+    _build(path, settings)
+    markers = list((settings.chroma_dir / "incomplete").glob("*.json"))
+    assert len(markers) == 1 and pdf_engine._ocr_cache
+    assert index_store.delete_for_pdf(path, settings) == 1
+    assert not markers[0].exists()
+    assert not pdf_engine._ocr_cache  # the deleted document's OCR text is not kept in memory
+
+
+def test_slow_ocr_of_one_pdf_does_not_block_indexing_another(
+    fake_tesseract, make_pdf, make_scanned_pdf, settings, fake_embeddings, monkeypatch
+):
+    import threading
+
+    started, release = threading.Event(), threading.Event()
+
+    def slow_ocr(page, language):
+        started.set()
+        release.wait(timeout=30)
+        return "scanned text"
+
+    monkeypatch.setattr(pdf_engine, "_ocr_page", slow_ocr)
+    scanned = make_scanned_pdf([SCAN_LINES])
+    errors = []
+
+    def build_scanned():
+        try:
+            _build(scanned, settings)
+        except Exception as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+
+    worker = threading.Thread(target=build_scanned)
+    worker.start()
+    try:
+        assert started.wait(timeout=30)
+        done = threading.Event()
+        other = threading.Thread(
+            target=lambda: (_build(make_pdf(["typed text " * 20]), settings), done.set())
+        )
+        other.start()
+        assert done.wait(timeout=30), "indexing a typed PDF waited for another PDF's OCR"
+        assert worker.is_alive()  # the scanned PDF really was still in OCR
+        other.join()
+    finally:
+        release.set()
+        worker.join(timeout=30)
+    assert not errors and _pages(_build(scanned, settings).db) == [0]
+
+
+def test_tesseract_never_runs_in_two_threads_at_once(
+    fake_tesseract, make_scanned_pdf, settings, monkeypatch
+):
+    # Real Tesseract through MuPDF fails with "Attempt to use Leptonica from 2 threads at once!".
+    import threading
+    import time
+
+    guard = threading.Lock()
+    state = {"running": 0, "peak": 0}
+
+    def ocr(page, language):
+        with guard:
+            state["running"] += 1
+            state["peak"] = max(state["peak"], state["running"])
+        time.sleep(0.05)
+        with guard:
+            state["running"] -= 1
+        return "scanned text"
+
+    monkeypatch.setattr(pdf_engine, "_ocr_page", ocr)
+    paths = [make_scanned_pdf([SCAN_LINES, SCAN_LINES]) for _ in range(3)]
+    threads = [
+        threading.Thread(target=pdf_engine.extract_pages, args=(path, settings)) for path in paths
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert state["peak"] == 1
+
+
+def test_concurrent_requests_for_the_same_pdf_build_it_once(
+    fake_tesseract, make_scanned_pdf, settings, fake_embeddings
+):
+    import threading
+
+    path = make_scanned_pdf([SCAN_LINES])
+    results = []
+    threads = [
+        threading.Thread(target=lambda: results.append(_build(path, settings))) for _ in range(3)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert len(results) == 3 and fake_tesseract == [(0, "eng")]  # OCR ran once
+
+
 def test_chat_warns_that_indexing_may_be_slow_when_ocr_is_active(
     fake_tesseract, settings, monkeypatch
 ):
     monkeypatch.setattr(
-        pdf_engine, "index_pdf", lambda *a, **k: (_ for _ in ()).throw(OSError("x"))
+        pdf_engine, "build_index", lambda *a, **k: (_ for _ in ()).throw(OSError("x"))
     )
     first = next(chat.run_turn("q?", "/x.pdf", config.BACKEND_LOCAL, "", 0.3, 256, True, settings))
     assert "OCR" in first.content
@@ -225,3 +408,28 @@ def test_real_tesseract_reads_a_scanned_page(make_scanned_pdf, settings):
     text = " ".join(d.page_content.lower() for d in docs)
     assert "quick brown fox" in text and "4271" in text
     assert docs[0].metadata["ocr"] is True
+
+
+@pytest.mark.ocr
+@pytest.mark.skipif(shutil.which("tesseract") is None, reason="Tesseract is not installed")
+def test_real_tesseract_gives_the_same_text_when_pdfs_are_read_at_once(make_scanned_pdf, settings):
+    import threading
+
+    paths = [make_scanned_pdf([[f"Document {i} quick brown fox", "4271"]]) for i in range(3)]
+    serial = {path: pdf_engine.extract_pages(path, settings) for path in paths}
+    pdf_engine._ocr_cache.clear()
+    results = {}
+
+    def read(path):
+        results[path] = pdf_engine.extract_pages(path, settings)
+
+    threads = [threading.Thread(target=read, args=(path,)) for path in paths]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=120)
+    for path in paths:
+        assert results[path].unread_pages == []
+        assert [d.page_content for d in results[path].documents] == [
+            d.page_content for d in serial[path].documents
+        ]
