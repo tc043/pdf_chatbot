@@ -7,7 +7,7 @@ import pytest
 from langchain_chroma import Chroma
 from langchain_core.embeddings import DeterministicFakeEmbedding
 
-from app import config, pdf_engine
+from app import config, index_store, pdf_engine
 from app.exceptions import (
     IndexingError,
     ModelUnavailableError,
@@ -305,6 +305,7 @@ def test_same_filename_different_content_gets_separate_indexes(make_pdf, setting
 def test_scanned_pdf_is_rejected_with_a_clear_message(make_pdf, settings, fake_embeddings):
     with pytest.raises(PDFValidationError, match="OCR"):
         pdf_engine.index_pdf(make_pdf(["", ""]), config.BACKEND_LOCAL, settings=settings)
+    assert index_store.list_indexes(settings) == []  # no empty collection is left behind
 
 
 def test_failed_indexing_leaves_no_partial_index(make_pdf, settings, fake_embeddings, monkeypatch):
@@ -335,6 +336,22 @@ def test_provider_errors_during_indexing_become_friendly(make_pdf, settings, mon
     )
     with pytest.raises(ModelUnavailableError, match="key was rejected"):
         pdf_engine.index_pdf(make_pdf(SAMPLE_PAGES), config.BACKEND_OPENAI, "sk-x", settings)
+    assert index_store.list_indexes(settings) == []  # no empty collection is left behind
+
+
+def test_index_deleted_during_a_build_still_returns_a_working_handle(
+    make_pdf, settings, fake_embeddings, monkeypatch
+):
+    path = make_pdf(SAMPLE_PAGES)
+    real = pdf_engine.extract_pages
+
+    def delete_meanwhile(*args, **kwargs):
+        index_store.clear(settings)  # e.g. an operator, or retention, while OCR runs
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pdf_engine, "extract_pages", delete_meanwhile)
+    db = pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=settings)
+    assert db.get(limit=1)["ids"]
 
 
 def test_index_rejects_invalid_pdf_before_touching_models(tmp_path, settings, monkeypatch):

@@ -726,6 +726,15 @@ def _open_collection(name: str, embeddings: Any, settings: config.Settings) -> C
     )
 
 
+def _discard_collection(db: Chroma, name: str) -> None:
+    """Remove a collection a failed first build left empty, so it is not listed forever."""
+    with _INDEX_LOCK:
+        try:
+            db.delete_collection()
+        except Exception:
+            logger.warning("Could not remove empty collection %s", name, exc_info=True)
+
+
 def _translate_indexing_error(exc: Exception) -> PDFChatbotError:
     translated = wrap_provider_error(exc, "index the PDF")
     if translated.__class__ is PDFChatbotError:
@@ -784,6 +793,7 @@ def build_index(
             extraction = extract_pages(file_path, settings, fingerprint=fingerprint)
         except PDFChatbotError:
             if previous is None:
+                _discard_collection(db, name)
                 raise
             extraction = None  # e.g. the OCR server is down: keep the incomplete index
         if extraction is None or (
@@ -805,6 +815,8 @@ def build_index(
             vectors = embeddings.embed_documents(texts)
         except Exception as exc:
             logger.exception("Embedding failed for collection %s", name)
+            if not exists:
+                _discard_collection(db, name)
             raise _translate_indexing_error(exc) from exc
 
         logger.info(
@@ -833,6 +845,9 @@ def build_index(
                 except Exception:
                     logger.warning("Could not remove partial collection %s", name, exc_info=True)
                 raise _translate_indexing_error(exc) from exc
+            # A fresh handle: the one opened above is stale if the collection was deleted
+            # (by an operator or retention) while this build ran outside the lock.
+            db = _open_collection(name, embeddings, settings)
         attempts = (previous[1] + 1) if previous else 1
         _write_marker(marker, extraction.unread_pages, attempts)
         will_retry = bool(extraction.unread_pages) and attempts < MAX_INDEX_ATTEMPTS
