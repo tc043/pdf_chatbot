@@ -88,12 +88,12 @@ def test_the_request_follows_the_server_recipe(fake_server, make_scanned_pdf, re
     assert request["extra_body"]["skip_special_tokens"] is False
 
 
-def test_a_failing_server_yields_empty_text(monkeypatch, make_scanned_pdf, remote):
+def test_a_failing_server_yields_none_not_an_empty_page(monkeypatch, make_scanned_pdf, remote):
     import pymupdf
 
     monkeypatch.setattr(ocr_remote, "_client", lambda settings: FakeClient(fail=True))
     with pymupdf.open(make_scanned_pdf([["hello"]])) as doc:
-        assert ocr_remote.recognize_page(doc[0], remote) == ""
+        assert ocr_remote.recognize_page(doc[0], remote) is None
 
 
 # ------------------------------------------------------------------- engine
@@ -178,20 +178,30 @@ def test_output_seen_from_the_live_server_is_cleaned():
     )
 
 
-def test_several_pages_are_read_in_order_and_a_failure_blanks_only_its_page(
+def test_several_pages_are_read_in_order_and_a_failure_marks_only_its_page(
     monkeypatch, make_scanned_pdf, remote
 ):
     import pymupdf
 
     def fake(image_url, page_number, settings):
         if page_number == 2:
-            return ""
+            return None
         return f"text of page {page_number}"
 
     monkeypatch.setattr(ocr_remote, "_recognize", fake)
     with pymupdf.open(make_scanned_pdf([["a"], ["b"], ["c"]])) as doc:
         texts = ocr_remote.recognize_pages(list(doc), remote)
-    assert texts == ["text of page 1", "", "text of page 3"]
+    assert texts == ["text of page 1", None, "text of page 3"]
+
+
+def test_a_page_the_server_failed_on_is_reported_as_unread(monkeypatch, make_scanned_pdf, remote):
+    def fake(image_url, page_number, settings):
+        return None if page_number == 1 else "readable"
+
+    monkeypatch.setattr(ocr_remote, "_recognize", fake)
+    extraction = pdf_engine.extract_pages(make_scanned_pdf([["a"], ["b"]]), remote)
+    assert [d.metadata["page"] for d in extraction.documents] == [1]
+    assert extraction.unread_pages == [1]
 
 
 def test_only_a_few_page_images_are_held_at_once(monkeypatch, make_scanned_pdf, remote):

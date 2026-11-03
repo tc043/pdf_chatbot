@@ -71,6 +71,21 @@ def _truncate(text: str, limit: int) -> str:
 
 
 OCR_REMOTE_NOTE = " They are sent to the configured OCR server."
+UNREAD_NOTICE_PREFIX = "⚠️ OCR could not read"
+
+
+def unread_pages_notice(unread_pages: Sequence[int], will_retry: bool) -> str:
+    """A note for the end of an answer when scanned pages are missing from the index."""
+    if not unread_pages:
+        return ""
+    pages = [str(p) for p in unread_pages]
+    listed = pages[0] if len(pages) == 1 else ", ".join(pages[:-1]) + " and " + pages[-1]
+    one = len(pages) == 1
+    noun, them, they = ("page", "it", "It") if one else ("pages", "them", "They")
+    note = f"{UNREAD_NOTICE_PREFIX} {noun} {listed} of this PDF, so this answer cannot use {them}."
+    if will_retry:
+        note += f" {they} will be tried again with your next question."
+    return note
 
 
 def indexing_message(settings: config.Settings) -> str:
@@ -99,7 +114,7 @@ def history_pairs(messages: Sequence[Any] | None, turns: int) -> list[tuple[str,
         if message.get("role") == "user":
             pending = text
         elif message.get("role") == "assistant" and pending is not None:
-            answer = _REASONING_RE.sub("", text).strip()
+            answer = _REASONING_RE.sub("", text).split(UNREAD_NOTICE_PREFIX)[0].strip()
             if pending and answer and not answer.startswith((ERROR_PREFIX, "⏳", "🔍", "✍️")):
                 pairs.append(
                     (
@@ -213,7 +228,8 @@ def _run_turn(
     logger.info("Chat turn: backend=%s question_chars=%d", backend, len(question))
 
     yield TurnUpdate(indexing_message(settings))
-    db = pdf_engine.index_pdf(pdf_path, backend, api_key, settings)
+    index = pdf_engine.build_index(pdf_path, backend, api_key, settings)
+    db = index.db
     _apply_retention(pdf_path, settings)
 
     yield TurnUpdate("🔍 Searching the document...")
@@ -252,3 +268,7 @@ def _run_turn(
         yield TurnUpdate(answer, page=best_page)
     if not answer.strip():
         yield _error("The model returned an empty answer. Please try rephrasing the question.")
+        return
+    notice = unread_pages_notice(index.unread_pages, index.will_retry)
+    if notice:
+        yield TurnUpdate(f"{answer.rstrip()}\n\n{notice}", page=best_page)

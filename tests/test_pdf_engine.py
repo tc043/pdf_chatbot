@@ -260,12 +260,36 @@ def test_existing_index_is_reused(make_pdf, settings, fake_embeddings, monkeypat
     path = make_pdf(SAMPLE_PAGES)
     pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=settings)
 
-    def boom(_):
+    def boom(*args, **kwargs):
         raise AssertionError("PDF was re-extracted although an index already exists")
 
-    monkeypatch.setattr(pdf_engine, "extract_documents", boom)
+    monkeypatch.setattr(pdf_engine, "extract_pages", boom)
     db = pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=settings)
     assert db.get(limit=1)["ids"]
+
+
+def test_a_pdf_being_indexed_counts_as_recently_used(
+    make_pdf, settings, fake_embeddings, monkeypatch
+):
+    # Retention prunes by last use; a PDF whose build is in progress must look freshly used.
+    import os
+    import time
+
+    path = make_pdf(SAMPLE_PAGES)
+    pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=settings)
+    bundle = pdf_engine.get_bundle_dir(pdf_engine.file_fingerprint(path), settings)
+    os.utime(bundle, (0, 0))
+    seen = {}
+    real = pdf_engine.extract_pages
+
+    def spy(*args, **kwargs):
+        seen["mtime"] = bundle.stat().st_mtime
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pdf_engine, "extract_pages", spy)
+    other_chunking = config.Settings(**{**settings.__dict__, "chunk_size": 300})
+    pdf_engine.index_pdf(path, config.BACKEND_LOCAL, settings=other_chunking)
+    assert seen["mtime"] > time.time() - 60
 
 
 def test_same_filename_different_content_gets_separate_indexes(make_pdf, settings, fake_embeddings):

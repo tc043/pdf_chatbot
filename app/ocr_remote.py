@@ -76,7 +76,7 @@ def _png_data_uri(page: pymupdf.Page) -> str:
     return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
-def _recognize(image_url: str, page_number: int, settings: config.Settings) -> str:
+def _recognize(image_url: str, page_number: int, settings: config.Settings) -> str | None:
     try:
         with _client(settings) as client:
             response = client.chat.completions.create(
@@ -98,21 +98,23 @@ def _recognize(image_url: str, page_number: int, settings: config.Settings) -> s
     except Exception:
         # Never log the response or the image: both are the user's document.
         logger.warning("Remote OCR failed for page %d", page_number, exc_info=True)
-        return ""
+        return None
 
 
-def recognize_page(page: pymupdf.Page, settings: config.Settings) -> str:
-    """Read one page through the remote server; failures yield an empty string."""
+def recognize_page(page: pymupdf.Page, settings: config.Settings) -> str | None:
+    """Read one page through the remote server; ``None`` if that failed."""
     try:
         image_url = _png_data_uri(page)
     except Exception:
         logger.warning("Could not render page %d for remote OCR", page.number + 1, exc_info=True)
-        return ""
+        return None
     return _recognize(image_url, page.number + 1, settings)
 
 
-def recognize_pages(pages: list[pymupdf.Page], settings: config.Settings) -> list[str]:
+def recognize_pages(pages: list[pymupdf.Page], settings: config.Settings) -> list[str | None]:
     """Read several pages with a few requests in flight; results keep the page order.
+
+    A page that could not be rendered or read is ``None`` (``""`` means it had no text).
 
     Pages are rendered one after another (a PyMuPDF document is not thread-safe), and a page is
     rendered only once a request slot is free, so at most ``REMOTE_CONCURRENCY`` images are held
@@ -120,14 +122,14 @@ def recognize_pages(pages: list[pymupdf.Page], settings: config.Settings) -> lis
     """
     slots = threading.BoundedSemaphore(REMOTE_CONCURRENCY)
 
-    def read(image_url: str, page_number: int) -> str:
+    def read(image_url: str, page_number: int) -> str | None:
         try:
             return _recognize(image_url, page_number, settings)
         finally:
             slots.release()
 
     with ThreadPoolExecutor(max_workers=REMOTE_CONCURRENCY) as pool:
-        futures: list[Future[str] | None] = []
+        futures: list[Future[str | None] | None] = []
         for page in pages:
             slots.acquire()
             try:
@@ -140,4 +142,4 @@ def recognize_pages(pages: list[pymupdf.Page], settings: config.Settings) -> lis
                 futures.append(None)
                 continue
             futures.append(pool.submit(read, image_url, page.number + 1))
-    return [future.result() if future else "" for future in futures]
+    return [future.result() if future else None for future in futures]

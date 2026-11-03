@@ -77,6 +77,12 @@ OCR'd pages is limited (`PDFCHAT_OCR_MAX_PAGES`); a PDF above the limit is rejec
 message naming it. Switch OCR off with `PDFCHAT_OCR=off`. Turning OCR on rebuilds the index of
 documents that were indexed without it.
 
+If OCR fails on a page (an error, or a remote OCR server that does not answer, for example while
+it is still starting), the PDF is indexed without that page and the answer ends with a note
+naming the missing pages. The next question tries those pages again (while the app keeps
+running, pages already read are not sent to OCR again), up to three attempts in all; after that
+the index is kept as it is and the note stays. A page that OCR read but found no text on is not retried.
+
 #### Remote OCR server (optional, experimental)
 
 Instead of Tesseract, scanned pages can be read by a vision model that you run yourself behind
@@ -219,7 +225,9 @@ after each question. Both are off by default, so nothing is deleted unless you a
   to the embeddings API). With the local backend nothing leaves your machine after the model
   download. Extracted text and embeddings are stored unencrypted in `PDFCHAT_CHROMA_DIR`;
   delete that directory, or see [Managing stored indexes](#managing-stored-indexes), to
-  remove them. There is no per-user isolation, and by default nothing is deleted
+  remove them. While OCR retries of a PDF's unread pages are pending, the text of its other
+  scanned pages is also kept in memory; it is dropped when the retries end, its index is
+  deleted, or the app restarts. There is no per-user isolation, and by default nothing is deleted
   automatically.
 - **Remote OCR.** Off by default. With `PDFCHAT_OCR_ENGINE=remote`, an image of every scanned
   page is sent to the server you configured, over whatever transport its URL uses (prefer
@@ -242,8 +250,11 @@ after each question. Both are off by default, so nothing is deleted unless you a
   repository only evaluates retrieval (see Development), not the quality of generated answers,
   and the quick check is small (21 questions on the two demo PDFs); see
   [docs/benchmark.md](docs/benchmark.md) for the larger benchmark on public papers.
-- Index builds are serialised in one process, and indexes are kept until you delete them
-  (see [Managing stored indexes](#managing-stored-indexes)) or enable a retention limit. The app is designed for a single server process and a small number of users.
+- Indexing runs inside the first question about a PDF. Different PDFs are indexed in parallel,
+  and requests for a PDF that is already being indexed wait for that build instead of repeating
+  it. Indexes are kept until you delete them (see
+  [Managing stored indexes](#managing-stored-indexes)) or enable a retention limit. The app is
+  designed for a single server process and a small number of users.
 - Gradio is pinned to the 5.x line; the UI uses APIs that Gradio 6 removed.
 - The local backend on CPU is slow, especially with reasoning mode on.
 
