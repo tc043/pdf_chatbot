@@ -319,6 +319,37 @@ def test_slow_ocr_of_one_pdf_does_not_block_indexing_another(
     assert not errors and _pages(_build(scanned, settings).db) == [0]
 
 
+def test_tesseract_never_runs_in_two_threads_at_once(
+    fake_tesseract, make_scanned_pdf, settings, monkeypatch
+):
+    # Real Tesseract through MuPDF fails with "Attempt to use Leptonica from 2 threads at once!".
+    import threading
+    import time
+
+    guard = threading.Lock()
+    state = {"running": 0, "peak": 0}
+
+    def ocr(page, language):
+        with guard:
+            state["running"] += 1
+            state["peak"] = max(state["peak"], state["running"])
+        time.sleep(0.05)
+        with guard:
+            state["running"] -= 1
+        return "scanned text"
+
+    monkeypatch.setattr(pdf_engine, "_ocr_page", ocr)
+    paths = [make_scanned_pdf([SCAN_LINES, SCAN_LINES]) for _ in range(3)]
+    threads = [
+        threading.Thread(target=pdf_engine.extract_pages, args=(path, settings)) for path in paths
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert state["peak"] == 1
+
+
 def test_concurrent_requests_for_the_same_pdf_build_it_once(
     fake_tesseract, make_scanned_pdf, settings, fake_embeddings
 ):
@@ -377,3 +408,28 @@ def test_real_tesseract_reads_a_scanned_page(make_scanned_pdf, settings):
     text = " ".join(d.page_content.lower() for d in docs)
     assert "quick brown fox" in text and "4271" in text
     assert docs[0].metadata["ocr"] is True
+
+
+@pytest.mark.ocr
+@pytest.mark.skipif(shutil.which("tesseract") is None, reason="Tesseract is not installed")
+def test_real_tesseract_gives_the_same_text_when_pdfs_are_read_at_once(make_scanned_pdf, settings):
+    import threading
+
+    paths = [make_scanned_pdf([[f"Document {i} quick brown fox", "4271"]]) for i in range(3)]
+    serial = {path: pdf_engine.extract_pages(path, settings) for path in paths}
+    pdf_engine._ocr_cache.clear()
+    results = {}
+
+    def read(path):
+        results[path] = pdf_engine.extract_pages(path, settings)
+
+    threads = [threading.Thread(target=read, args=(path,)) for path in paths]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=120)
+    for path in paths:
+        assert results[path].unread_pages == []
+        assert [d.page_content for d in results[path].documents] == [
+            d.page_content for d in serial[path].documents
+        ]

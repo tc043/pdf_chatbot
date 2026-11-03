@@ -251,8 +251,9 @@ after each question. Both are off by default, so nothing is deleted unless you a
   and the quick check is small (21 questions on the two demo PDFs); see
   [docs/benchmark.md](docs/benchmark.md) for the larger benchmark on public papers.
 - Indexing runs inside the first question about a PDF. Different PDFs are indexed in parallel,
-  and requests for a PDF that is already being indexed wait for that build instead of repeating
-  it. Indexes are kept until you delete them (see
+  except that Tesseract reads one page at a time for the whole server (it cannot run in two
+  threads at once), and requests for a PDF that is already being indexed wait for that build
+  instead of repeating it. Indexes are kept until you delete them (see
   [Managing stored indexes](#managing-stored-indexes)) or enable a retention limit. The app is
   designed for a single server process and a small number of users.
 - Gradio is pinned to the 5.x line; the UI uses APIs that Gradio 6 removed.

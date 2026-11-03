@@ -49,6 +49,12 @@ OCR_DPI = 200
 _INDEX_LOCK = threading.Lock()
 _build_locks: dict[str, threading.Lock] = {}  # one small lock per index built by this process
 _build_locks_guard = threading.Lock()
+# Some MuPDF work must not run in two threads at once even for different PDFs: Tesseract OCR
+# fails with "Attempt to use Leptonica from 2 threads at once!", and older PyMuPDF releases keep
+# the table finder's state in module globals. Both are serialised one page at a time, so
+# remote OCR requests, embedding and the rest of extraction still run in parallel.
+_TESSERACT_LOCK = threading.Lock()
+_TABLES_LOCK = threading.Lock()
 
 # An index with scanned pages that OCR could not read is rebuilt on later requests (only the
 # unread pages are sent to OCR again) until this many attempts, then kept as it is.
@@ -244,11 +250,12 @@ def _extract_page_markdown(page: pymupdf.Page) -> tuple[str, int]:
     """
     tables: list[tuple[tuple[float, float, float, float], str]] = []
     try:
-        finder = page.find_tables()
-        for tab in getattr(finder, "tables", ()):
-            md_table = tab.to_markdown().strip()
-            if md_table:
-                tables.append((tuple(tab.bbox), md_table))
+        with _TABLES_LOCK:
+            finder = page.find_tables()
+            for tab in getattr(finder, "tables", ()):
+                md_table = tab.to_markdown().strip()
+                if md_table:
+                    tables.append((tuple(tab.bbox), md_table))
     except Exception:
         tables = []
 
@@ -537,7 +544,10 @@ def _ocr_pages(
     if settings.ocr_engine == config.OCR_ENGINE_REMOTE:
         fresh = ocr_remote.recognize_pages(pages, settings)
     else:
-        fresh = [_ocr_page(page, settings.ocr_language) for page in pages]
+        fresh = []
+        for page in pages:
+            with _TESSERACT_LOCK:
+                fresh.append(_ocr_page(page, settings.ocr_language))
     with _ocr_cache_lock:
         for n, text in zip(todo, fresh, strict=True):
             texts[n] = text
